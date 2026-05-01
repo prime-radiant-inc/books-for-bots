@@ -5,6 +5,7 @@ pub use error::Error;
 pub mod assemble;
 pub mod block;
 pub mod extract;
+pub mod frontmatter;
 pub mod images;
 pub mod load;
 pub mod render;
