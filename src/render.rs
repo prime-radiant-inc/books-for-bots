@@ -1,5 +1,14 @@
 use crate::block::{Block, Inline};
 
+fn backtick_fence_for(s: &str) -> String {
+    let mut max_run = 0usize;
+    let mut cur = 0usize;
+    for c in s.chars() {
+        if c == '`' { cur += 1; max_run = max_run.max(cur); } else { cur = 0; }
+    }
+    "`".repeat(max_run + 1)
+}
+
 #[derive(Debug, Clone)]
 pub struct ChapterOffset {
     /// Body-relative byte offset (0-indexed) where the chapter heading begins.
@@ -105,7 +114,15 @@ impl Renderer {
                 self.ensure_blank_line();
                 self.write_raw(&format!("<a id=\"{id}\"></a>\n"));
             }
-            // Tasks 17-20 will add: List, Table, CodeBlock, Image, FootnoteDef, inline pieces.
+            Block::Image { src, alt, title } => {
+                self.ensure_blank_line();
+                match title {
+                    Some(t) => self.write_raw(&format!(r#"![{alt}]({src} "{t}")"#)),
+                    None => self.write_raw(&format!("![{alt}]({src})")),
+                }
+                self.write_raw("\n\n");
+            }
+            // Tasks 18-20 will add: List, Table, CodeBlock, FootnoteDef.
             _ => { /* placeholder for later tasks */ }
         }
     }
@@ -114,8 +131,37 @@ impl Renderer {
         match i {
             Inline::Text(s) => self.write_raw(s),
             Inline::Concat(xs) => for x in xs { self.render_inline(x); },
-            // Task 17 fills in: Emphasis, Strong, Code, Link, Image, FootnoteRef, LineBreak.
-            _ => {}
+            Inline::Emphasis(xs) => {
+                self.write_raw("*");
+                for x in xs { self.render_inline(x); }
+                self.write_raw("*");
+            }
+            Inline::Strong(xs) => {
+                self.write_raw("**");
+                for x in xs { self.render_inline(x); }
+                self.write_raw("**");
+            }
+            Inline::Code(s) => {
+                let fence = backtick_fence_for(s);
+                self.write_raw(&fence);
+                if s.starts_with('`') { self.write_raw(" "); }
+                self.write_raw(s);
+                if s.ends_with('`') { self.write_raw(" "); }
+                self.write_raw(&fence);
+            }
+            Inline::Link { href, children } => {
+                self.write_raw("[");
+                for c in children { self.render_inline(c); }
+                self.write_raw(&format!("]({href})"));
+            }
+            Inline::Image { src, alt, title } => {
+                match title {
+                    Some(t) => self.write_raw(&format!(r#"![{alt}]({src} "{t}")"#)),
+                    None => self.write_raw(&format!("![{alt}]({src})")),
+                }
+            }
+            Inline::FootnoteRef(id) => self.write_raw(&format!("[^{id}]")),
+            Inline::LineBreak => self.write_raw("  \n"),
         }
     }
 }
@@ -169,5 +215,59 @@ mod tests {
             Block::Paragraph(Inline::Text("said".into())),
         ])]);
         assert!(s.contains("> said\n"));
+    }
+
+    #[test]
+    fn emphasis_and_strong() {
+        let s = render_one(vec![Block::Paragraph(Inline::Concat(vec![
+            Inline::Emphasis(vec![Inline::Text("a".into())]),
+            Inline::Text(" and ".into()),
+            Inline::Strong(vec![Inline::Text("b".into())]),
+        ]))]);
+        assert!(s.contains("*a* and **b**"));
+    }
+
+    #[test]
+    fn inline_code_with_backtick() {
+        let s = render_one(vec![Block::Paragraph(Inline::Code("x`y".into()))]);
+        assert!(s.contains("``x`y``"));
+    }
+
+    #[test]
+    fn link() {
+        let s = render_one(vec![Block::Paragraph(Inline::Link {
+            href: "h".into(), children: vec![Inline::Text("t".into())],
+        })]);
+        assert!(s.contains("[t](h)"));
+    }
+
+    #[test]
+    fn line_break() {
+        let s = render_one(vec![Block::Paragraph(Inline::Concat(vec![
+            Inline::Text("a".into()), Inline::LineBreak, Inline::Text("b".into()),
+        ]))]);
+        assert!(s.contains("a  \nb"));
+    }
+
+    #[test]
+    fn footnote_ref() {
+        let s = render_one(vec![Block::Paragraph(Inline::FootnoteRef("c1-fn1".into()))]);
+        assert!(s.contains("[^c1-fn1]"));
+    }
+
+    #[test]
+    fn block_image() {
+        let s = render_one(vec![Block::Image {
+            src: "images/x.jpg".into(), alt: "cat".into(), title: None,
+        }]);
+        assert!(s.contains("![cat](images/x.jpg)"));
+    }
+
+    #[test]
+    fn block_image_with_title() {
+        let s = render_one(vec![Block::Image {
+            src: "x.jpg".into(), alt: "a".into(), title: Some("t".into()),
+        }]);
+        assert!(s.contains(r#"![a](x.jpg "t")"#));
     }
 }
