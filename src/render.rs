@@ -9,6 +9,26 @@ fn backtick_fence_for(s: &str) -> String {
     "`".repeat(max_run + 1)
 }
 
+/// Collapse every run of ASCII whitespace down to a single space.
+/// Used inside heading lines, where adjacent text nodes around a <br/>
+/// in the source can produce stray double-spaces.
+fn collapse_runs_of_whitespace(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut prev_space = false;
+    for c in s.chars() {
+        if c.is_whitespace() {
+            if !prev_space {
+                out.push(' ');
+            }
+            prev_space = true;
+        } else {
+            out.push(c);
+            prev_space = false;
+        }
+    }
+    out
+}
+
 #[derive(Debug, Clone)]
 pub struct ChapterOffset {
     /// Body-relative byte offset (0-indexed) where the chapter heading begins.
@@ -117,8 +137,14 @@ impl Renderer {
                 // Per spec: in-chapter <h1> shifts to ##, <h2> to ###, etc.
                 let shifted = (*level + 1).min(6);
                 let hashes = "#".repeat(shifted as usize);
+                // Render the heading's inline content to a scratch buffer, then
+                // collapse runs of whitespace (XHTML indentation between inline
+                // elements often produces stray double-spaces around <br/>).
+                let mut sub = Renderer::new();
+                sub.render_inline_for_heading(text);
+                let collapsed = collapse_runs_of_whitespace(&sub.buf);
                 self.write_raw(&format!("{hashes} "));
-                self.render_inline_for_heading(text);
+                self.write_raw(collapsed.trim());
                 self.write_raw("\n\n");
             }
             Block::HorizontalRule => {
@@ -321,7 +347,10 @@ impl Renderer {
                 }
             }
             Inline::FootnoteRef(id) => self.write_raw(&format!("[^{id}]")),
-            Inline::LineBreak => self.write_raw(" "), // replace hard break with space in headings
+            // In headings, LineBreaks become spaces. Surrounding stray spaces
+            // are collapsed by collapse_runs_of_whitespace at the heading-block
+            // emission site.
+            Inline::LineBreak => self.write_raw(" "),
         }
     }
 }
@@ -560,5 +589,19 @@ mod tests {
         }]);
         assert!(s.contains("## Title subtitle\n"), "got: {s}");
         assert!(!s.contains("Title  \n"), "should not have hard break in heading; got: {s}");
+    }
+
+    #[test]
+    fn linebreak_after_trailing_space_does_not_double() {
+        let s = render_one(vec![Block::Heading {
+            level: 1,
+            text: Inline::Concat(vec![
+                Inline::Text("Title ".into()), // text already ends with a space
+                Inline::LineBreak,
+                Inline::Text("subtitle".into()),
+            ]),
+        }]);
+        assert!(s.contains("## Title subtitle\n"), "got: {s}");
+        assert!(!s.contains("Title  subtitle"), "should collapse double space; got: {s}");
     }
 }
