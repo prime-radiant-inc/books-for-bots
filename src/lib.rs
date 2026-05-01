@@ -2,6 +2,7 @@
 
 pub use error::Error;
 
+pub mod block;
 mod cli;
 mod error;
 
