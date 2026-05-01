@@ -104,11 +104,17 @@ pub fn open(path: &Path) -> Result<Book> {
     // --- Build TOC lookup: canonical path string → label ---
     // NavPoint.content is an absolute PathBuf (root_base-prefixed).
     // We normalise to the same string form used by ResourceItem.path.
+    // Strip any #fragment from the TOC content path: multiple fragments
+    // pointing to the same file are OK — first match wins.
     let toc_map: BTreeMap<String, String> = doc
         .toc
         .iter()
         .map(|nav| {
-            let key = nav.content.to_string_lossy().into_owned();
+            let raw = nav.content.to_string_lossy();
+            let key = match raw.split_once('#') {
+                Some((path, _frag)) => path.to_string(),
+                None => raw.into_owned(),
+            };
             (key, nav.label.clone())
         })
         .collect();
