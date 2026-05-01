@@ -2,6 +2,7 @@
 
 pub use error::Error;
 
+pub mod assemble;
 pub mod block;
 pub mod extract;
 pub mod images;
