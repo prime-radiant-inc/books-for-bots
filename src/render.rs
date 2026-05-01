@@ -122,7 +122,38 @@ impl Renderer {
                 }
                 self.write_raw("\n\n");
             }
-            // Tasks 18-20 will add: List, Table, CodeBlock, FootnoteDef.
+            Block::List { ordered, items } => {
+                self.ensure_blank_line();
+                for (idx, item) in items.iter().enumerate() {
+                    let marker = if *ordered {
+                        format!("{}. ", idx + 1)
+                    } else {
+                        "- ".to_string()
+                    };
+                    let indent = " ".repeat(marker.len());
+                    let mut sub = Renderer::new();
+                    for b in item { sub.render_block(b); }
+                    let trimmed = sub.buf.trim();
+                    let mut first_line = true;
+                    for line in trimmed.split_inclusive('\n') {
+                        if line.trim().is_empty() {
+                            continue;
+                        }
+                        if first_line {
+                            self.write_raw(&marker);
+                            first_line = false;
+                        } else {
+                            self.write_raw(&indent);
+                        }
+                        self.write_raw(line);
+                        if !line.ends_with('\n') {
+                            self.write_raw("\n");
+                        }
+                    }
+                }
+                self.write_raw("\n");
+            }
+            // Tasks 19-20 will add: Table, CodeBlock, FootnoteDef.
             _ => { /* placeholder for later tasks */ }
         }
     }
@@ -269,5 +300,44 @@ mod tests {
             src: "x.jpg".into(), alt: "a".into(), title: Some("t".into()),
         }]);
         assert!(s.contains(r#"![a](x.jpg "t")"#));
+    }
+
+    #[test]
+    fn unordered_list() {
+        let s = render_one(vec![Block::List {
+            ordered: false,
+            items: vec![
+                vec![Block::Paragraph(Inline::Text("a".into()))],
+                vec![Block::Paragraph(Inline::Text("b".into()))],
+            ],
+        }]);
+        assert!(s.contains("- a\n- b\n"), "got: {s}");
+    }
+
+    #[test]
+    fn ordered_list() {
+        let s = render_one(vec![Block::List {
+            ordered: true,
+            items: vec![
+                vec![Block::Paragraph(Inline::Text("x".into()))],
+                vec![Block::Paragraph(Inline::Text("y".into()))],
+            ],
+        }]);
+        assert!(s.contains("1. x\n2. y\n"));
+    }
+
+    #[test]
+    fn nested_list_indents_two_spaces() {
+        let s = render_one(vec![Block::List {
+            ordered: false,
+            items: vec![vec![
+                Block::Paragraph(Inline::Text("outer".into())),
+                Block::List {
+                    ordered: false,
+                    items: vec![vec![Block::Paragraph(Inline::Text("inner".into()))]],
+                },
+            ]],
+        }]);
+        assert!(s.contains("- outer\n  - inner\n"), "got: {s}");
     }
 }
