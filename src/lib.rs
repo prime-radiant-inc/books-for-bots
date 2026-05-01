@@ -7,6 +7,7 @@ pub mod block;
 pub mod extract;
 pub mod images;
 pub mod load;
+pub mod render;
 pub mod slug;
 mod cli;
 mod error;
