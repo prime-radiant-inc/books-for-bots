@@ -2,9 +2,13 @@ use crate::block::{Block, Inline};
 
 /// Resolve the title for a single spine document, in priority order:
 /// 1. TOC label
-/// 2. The HTML <title> element (passed as `html_title`, may be empty)
-/// 3. First H1 or H2 in the parsed blocks
+/// 2. First H1 or H2 in the parsed blocks
+/// 3. The HTML <title> element (passed as `html_title`, may be empty)
 /// 4. `Untitled (<filename>)`
+///
+/// H1/H2 is preferred over HTML <title> because real-world EPUBs put the
+/// book title in the HTML <title> of every spine document, making it a
+/// poor source for chapter titles.
 pub fn resolve_title(
     toc_label: Option<&str>,
     html_title: Option<&str>,
@@ -12,12 +16,6 @@ pub fn resolve_title(
     spine_filename: &str,
 ) -> String {
     if let Some(t) = toc_label {
-        let trimmed = t.trim();
-        if !trimmed.is_empty() {
-            return trimmed.to_string();
-        }
-    }
-    if let Some(t) = html_title {
         let trimmed = t.trim();
         if !trimmed.is_empty() {
             return trimmed.to_string();
@@ -31,6 +29,12 @@ pub fn resolve_title(
                     return s;
                 }
             }
+        }
+    }
+    if let Some(t) = html_title {
+        let trimmed = t.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
         }
     }
     format!("Untitled ({spine_filename})")
@@ -61,9 +65,10 @@ mod tests {
     }
 
     #[test]
-    fn html_title_when_no_toc() {
-        let t = resolve_title(None, Some("Page"), &[], "x.xhtml");
-        assert_eq!(t, "Page");
+    fn html_title_when_no_h1_h2() {
+        // Falls through to HTML title only if there's no body heading.
+        let t = resolve_title(None, Some("Page Title"), &[], "x.xhtml");
+        assert_eq!(t, "Page Title");
     }
 
     #[test]
@@ -74,6 +79,17 @@ mod tests {
         ];
         let t = resolve_title(None, None, &blocks, "x.xhtml");
         assert_eq!(t, "Real Title");
+    }
+
+    #[test]
+    fn h1_wins_over_html_title() {
+        // Real-world: HTML <title> usually contains the book title, not the
+        // chapter title. The body's first H1/H2 is more reliable.
+        let blocks = vec![
+            Block::Heading { level: 1, text: Inline::Text("Real Chapter Title".into()) },
+        ];
+        let t = resolve_title(None, Some("Book Title"), &blocks, "ch1.xhtml");
+        assert_eq!(t, "Real Chapter Title");
     }
 
     #[test]

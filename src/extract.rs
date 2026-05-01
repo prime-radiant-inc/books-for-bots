@@ -56,7 +56,7 @@ fn extract_li(li: ElementRef) -> Vec<Block> {
         .any(|c| is_block_tag(c.value().name()));
     if !has_block_child {
         // Pure inline: one paragraph for the whole <li>.
-        let inl = inline_of(li);
+        let inl = inline_of(li, false);
         if inl.is_empty() {
             return vec![Block::Paragraph(Inline::empty())];
         }
@@ -108,14 +108,14 @@ fn inline_of_single(el: ElementRef) -> Inline {
     let tag = el.value().name();
     match tag {
         "em" | "i" => {
-            let kids = match inline_of(el) {
+            let kids = match inline_of(el, false) {
                 Inline::Concat(v) => v,
                 other => vec![other],
             };
             Inline::Emphasis(kids)
         }
         "strong" | "b" => {
-            let kids = match inline_of(el) {
+            let kids = match inline_of(el, false) {
                 Inline::Concat(v) => v,
                 other => vec![other],
             };
@@ -134,8 +134,10 @@ fn inline_of_single(el: ElementRef) -> Inline {
             if is_noteref {
                 let id = href.trim_start_matches('#').to_string();
                 Inline::FootnoteRef(id)
+            } else if href.is_empty() {
+                inline_of(el, false)
             } else {
-                let kids = match inline_of(el) {
+                let kids = match inline_of(el, false) {
                     Inline::Concat(v) => v,
                     other => vec![other],
                 };
@@ -147,7 +149,7 @@ fn inline_of_single(el: ElementRef) -> Inline {
             alt: el.value().attr("alt").unwrap_or("").to_string(),
             title: el.value().attr("title").map(str::to_string),
         },
-        _ => inline_of(el),
+        _ => inline_of(el, false),
     }
 }
 
@@ -156,14 +158,14 @@ fn extract_into(el: ElementRef, out: &mut Vec<Block>) {
 
     match name {
         "p" => {
-            let inl = inline_of(el);
+            let inl = inline_of(el, false);
             if !inl.is_empty() {
                 out.push(Block::Paragraph(inl));
             }
         }
         "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => {
             let level: u8 = name.as_bytes()[1] - b'0';
-            out.push(Block::Heading { level, text: inline_of(el) });
+            out.push(Block::Heading { level, text: inline_of(el, false) });
         }
         "ul" | "ol" => {
             let ordered = name == "ol";
@@ -195,7 +197,7 @@ fn extract_into(el: ElementRef, out: &mut Vec<Block>) {
                     .children()
                     .filter_map(ElementRef::wrap)
                     .filter(|c| matches!(c.value().name(), "th" | "td"))
-                    .map(inline_of)
+                    .map(|el| inline_of(el, false))
                     .collect();
                 let is_header_row = !header_set
                     && tr.children().filter_map(ElementRef::wrap).any(|c| c.value().name() == "th");
@@ -255,29 +257,31 @@ fn extract_into(el: ElementRef, out: &mut Vec<Block>) {
     }
 }
 
-fn inline_of(el: ElementRef) -> Inline {
+fn inline_of(el: ElementRef, has_outer_prior: bool) -> Inline {
     let mut parts = Vec::new();
     for child in el.children() {
         match child.value() {
             Node::Text(t) => {
-                let collapsed = collapse_ws_inline(&t, !parts.is_empty());
+                let has_prior = has_outer_prior || !parts.is_empty();
+                let collapsed = collapse_ws_inline(&t, has_prior);
                 if !collapsed.is_empty() {
                     parts.push(Inline::Text(collapsed));
                 }
             }
             Node::Element(_) => {
                 if let Some(ce) = ElementRef::wrap(child) {
+                    let inner_outer_prior = has_outer_prior || !parts.is_empty();
                     let tag = ce.value().name();
                     let inner = match tag {
                         "em" | "i" => {
-                            let kids = match inline_of(ce) {
+                            let kids = match inline_of(ce, false) {
                                 Inline::Concat(v) => v,
                                 other => vec![other],
                             };
                             Inline::Emphasis(kids)
                         }
                         "strong" | "b" => {
-                            let kids = match inline_of(ce) {
+                            let kids = match inline_of(ce, false) {
                                 Inline::Concat(v) => v,
                                 other => vec![other],
                             };
@@ -296,8 +300,12 @@ fn inline_of(el: ElementRef) -> Inline {
                             if is_noteref {
                                 let id = href.trim_start_matches('#').to_string();
                                 Inline::FootnoteRef(id)
+                            } else if href.is_empty() {
+                                // Anchor-only <a id="..."> — return its content inline,
+                                // not as a link. Avoids broken "[text]()" output.
+                                inline_of(ce, inner_outer_prior)
                             } else {
-                                let kids = match inline_of(ce) {
+                                let kids = match inline_of(ce, false) {
                                     Inline::Concat(v) => v,
                                     other => vec![other],
                                 };
@@ -310,7 +318,7 @@ fn inline_of(el: ElementRef) -> Inline {
                             let title = ce.value().attr("title").map(str::to_string);
                             Inline::Image { src, alt, title }
                         }
-                        _ => inline_of(ce), // transparent
+                        _ => inline_of(ce, inner_outer_prior), // transparent
                     };
                     if !inner.is_empty() || matches!(inner, Inline::LineBreak | Inline::Image{..} | Inline::Code(_)) {
                         parts.push(inner);
@@ -570,6 +578,46 @@ mod tests {
         let Block::FootnoteDef { id, content } = &b[0] else { panic!() };
         assert_eq!(id, "fn1");
         assert_eq!(content, &vec![Block::Paragraph(Inline::Text("Note one.".into()))]);
+    }
+
+    #[test]
+    fn whitespace_preserved_across_inline_elements() {
+        // Real-world XHTML pattern from Kobo-style epubs: <em>did</em><span> warn you</span>
+        // The space at the start of the span's text must be preserved.
+        let html = r#"<html><body><p>they <em>did</em><span> warn you</span>.</p></body></html>"#;
+        let b = parse(html);
+        let Block::Paragraph(Inline::Concat(parts)) = &b[0] else { panic!("got: {b:?}") };
+        // Should be: "they ", Emphasis("did"), " warn you", "."
+        let mut concatenated = String::new();
+        for p in parts {
+            match p {
+                Inline::Text(s) => concatenated.push_str(s),
+                Inline::Emphasis(xs) => {
+                    concatenated.push('*');
+                    for x in xs {
+                        if let Inline::Text(s) = x { concatenated.push_str(s); }
+                    }
+                    concatenated.push('*');
+                }
+                _ => {}
+            }
+        }
+        assert_eq!(concatenated, "they *did* warn you.", "got: {concatenated:?}");
+    }
+
+    #[test]
+    fn anchor_only_a_tag_no_link() {
+        // <a id="..." > with no href is just an anchor target — don't render
+        // as a markdown link with empty href.
+        let html = r#"<html><body><p>before<a id="foo">.</a>after</p></body></html>"#;
+        let b = parse(html);
+        let Block::Paragraph(Inline::Concat(parts)) = &b[0] else { panic!("got: {b:?}") };
+        // Should NOT contain Inline::Link with empty href.
+        for p in parts {
+            if let Inline::Link { href, .. } = p {
+                panic!("unexpected Link with href={href:?}");
+            }
+        }
     }
 
     #[test]
