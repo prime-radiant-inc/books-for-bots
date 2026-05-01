@@ -2,11 +2,13 @@
 
 pub use error::Error;
 
+mod cli;
 mod error;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// Top-level entry point used by the binary.
 pub fn run_from_args() -> Result<()> {
+    use clap::Parser;
+    let _args = cli::Args::parse();
     Err(Error::NotImplemented)
 }
