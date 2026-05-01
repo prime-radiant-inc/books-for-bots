@@ -3,6 +3,7 @@
 pub use error::Error;
 
 pub mod block;
+pub mod slug;
 mod cli;
 mod error;
 
