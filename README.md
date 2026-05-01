@@ -5,11 +5,11 @@ Convert an EPUB into a single YAML-headed Markdown file optimized for token-effi
 ## What it produces
 
 ```
-output/<slug>/book.md
+output/<slug>/<slug>.md
 output/<slug>/images/<basename>
 ```
 
-`book.md` opens with a YAML frontmatter that lists every chapter with its absolute byte and line offsets in the file. The body is plain GFM Markdown. No HTML cleanup that requires judgment, no reflow, no surprises — just a deterministic structural translation of the book.
+The markdown file opens with a YAML frontmatter that lists every chapter with its absolute byte and line offsets in the file. The body is plain GFM Markdown. No HTML cleanup that requires judgment, no reflow, no surprises — just a deterministic structural translation of the book.
 
 ## Install
 
@@ -27,7 +27,7 @@ Pass `--force` to overwrite an existing output directory.
 
 ## Why offsets in the frontmatter?
 
-So an agent can `Read book.md --offset N --limit M` and seek directly to the chapter it wants, without parsing the whole file or walking a directory tree.
+So an agent can read the markdown file with `--offset N --limit M` and seek directly to the chapter it wants, without parsing the whole file or walking a directory tree.
 
 ## Design
 

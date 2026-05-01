@@ -20,7 +20,7 @@ fn end_to_end_minimal_book() {
     let args = Args { input: in_path, output_dir: out.clone(), force: false };
     write::convert(&args).expect("convert");
 
-    let book_md = std::fs::read_to_string(out.join("smoke-test-tester/book.md")).unwrap();
+    let book_md = std::fs::read_to_string(out.join("smoke-test-tester/smoke-test-tester.md")).unwrap();
     assert!(book_md.starts_with("---\n"));
     assert!(book_md.contains("title: Smoke Test\n"));
     assert!(book_md.contains("## Intro"));

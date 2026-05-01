@@ -92,9 +92,9 @@ pub fn convert(args: &Args) -> Result<()> {
     let final_fm = frontmatter::render(&book.metadata, &final_offsets)?;
     debug_assert_eq!(final_fm.len(), preliminary_fm.len(), "padded frontmatter changed size");
 
-    // 8. Write book.md.
+    // 8. Write <slug>.md.
     let book_md = format!("{final_fm}{}", body_result.body);
-    let book_md_path = book_dir.join("book.md");
+    let book_md_path = book_dir.join(format!("{slug}.md"));
     fs::write(&book_md_path, book_md).map_err(|source| Error::Io { source, path: book_md_path.clone() })?;
 
     // 9. Copy images (skip cover).

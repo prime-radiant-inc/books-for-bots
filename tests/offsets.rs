@@ -20,7 +20,7 @@ fn chapter_offsets_seek_to_correct_heading() {
     let out = tmp.path().join("out");
     write::convert(&Args { input: in_path, output_dir: out.clone(), force: false }).unwrap();
 
-    let path = out.join("off-t/book.md");
+    let path = out.join("off-t/off-t.md");
     let s = std::fs::read_to_string(&path).unwrap();
 
     // Parse chapter offsets without a YAML lib: scan lines.

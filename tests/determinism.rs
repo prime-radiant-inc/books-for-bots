@@ -20,7 +20,7 @@ fn two_runs_produce_identical_output() {
         let out = tmp.path().join(sub);
         let args = Args { input: in_path.clone(), output_dir: out.clone(), force: false };
         write::convert(&args).expect("convert");
-        std::fs::read(out.join("det-t/book.md")).unwrap()
+        std::fs::read(out.join("det-t/det-t.md")).unwrap()
     };
 
     let a = run("out_a");
