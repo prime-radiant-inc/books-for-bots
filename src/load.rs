@@ -146,15 +146,15 @@ pub fn open(path: &Path) -> Result<Book> {
     }
 
     // --- Images ---
-    let image_ids: Vec<(String, std::path::PathBuf)> = doc
+    let image_paths: Vec<std::path::PathBuf> = doc
         .resources
-        .iter()
-        .filter(|(_, r)| r.mime.starts_with("image/"))
-        .map(|(id, r)| (id.clone(), r.path.clone()))
+        .values()
+        .filter(|r| r.mime.starts_with("image/"))
+        .map(|r| r.path.clone())
         .collect();
 
     let mut images = BTreeMap::new();
-    for (_, path) in &image_ids {
+    for path in &image_paths {
         let key = path.to_string_lossy().into_owned();
         if let Some(bytes) = doc.get_resource_by_path(path) {
             images.insert(key, bytes);

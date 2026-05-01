@@ -21,4 +21,7 @@ fn loads_minimal_two_chapter_book() {
     assert_eq!(book.spine.len(), 2);
     assert_eq!(book.spine[0].toc_title.as_deref(), Some("One"));
     assert!(book.spine[0].html.contains("First chapter"));
+    assert_eq!(book.spine[1].toc_title.as_deref(), Some("Two"));
+    assert!(book.spine[1].html.contains("Second chapter"));
+    assert!(book.cover_image.is_none(), "synthetic fixture has no cover");
 }
