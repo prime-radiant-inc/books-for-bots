@@ -11,7 +11,6 @@ pub struct FrontmatterChapter<'a> {
 /// Render the frontmatter as a UTF-8 string ending in `---\n`. The byte size
 /// and line count are intrinsic to the returned string.
 pub fn render(meta: &Metadata, chapters: &[FrontmatterChapter<'_>]) -> Result<String, crate::Error> {
-    use crate::Error;
     let mut s = String::new();
     s.push_str("---\n");
     write_kv(&mut s, "title", &meta.title);
