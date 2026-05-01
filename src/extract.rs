@@ -146,6 +146,34 @@ fn extract_into(el: ElementRef, out: &mut Vec<Block>) {
             out.push(Block::BlockQuote(inner));
         }
         "hr" => out.push(Block::HorizontalRule),
+        "table" => {
+            // Find header: prefer rows that contain <th>; first such row is header.
+            let mut header: Vec<Inline> = Vec::new();
+            let mut rows: Vec<Vec<Inline>> = Vec::new();
+            let trs: Vec<ElementRef> = el
+                .descendants()
+                .filter_map(ElementRef::wrap)
+                .filter(|n| n.value().name() == "tr")
+                .collect();
+            let mut header_set = false;
+            for tr in trs {
+                let cells: Vec<Inline> = tr
+                    .children()
+                    .filter_map(ElementRef::wrap)
+                    .filter(|c| matches!(c.value().name(), "th" | "td"))
+                    .map(inline_of)
+                    .collect();
+                let is_header_row = !header_set
+                    && tr.children().filter_map(ElementRef::wrap).any(|c| c.value().name() == "th");
+                if is_header_row {
+                    header = cells;
+                    header_set = true;
+                } else {
+                    rows.push(cells);
+                }
+            }
+            out.push(Block::Table { header, rows });
+        }
         "pre" => {
             let code_el = el
                 .children()
@@ -415,5 +443,35 @@ mod tests {
     fn pre_no_code() {
         let b = parse("<html><body><pre>raw text</pre></body></html>");
         assert_eq!(b, vec![Block::CodeBlock { lang: None, code: "raw text".into() }]);
+    }
+
+    #[test]
+    fn simple_table() {
+        let html = r#"<html><body><table>
+            <thead><tr><th>Name</th><th>Age</th></tr></thead>
+            <tbody>
+              <tr><td>Alice</td><td>30</td></tr>
+              <tr><td>Bob</td><td>25</td></tr>
+            </tbody></table></body></html>"#;
+        let b = parse(html);
+        assert_eq!(b, vec![Block::Table {
+            header: vec![Inline::Text("Name".into()), Inline::Text("Age".into())],
+            rows: vec![
+                vec![Inline::Text("Alice".into()), Inline::Text("30".into())],
+                vec![Inline::Text("Bob".into()), Inline::Text("25".into())],
+            ],
+        }]);
+    }
+
+    #[test]
+    fn table_no_thead_uses_first_row_as_header() {
+        let html = r#"<html><body><table>
+            <tr><th>A</th><th>B</th></tr>
+            <tr><td>1</td><td>2</td></tr>
+        </table></body></html>"#;
+        let b = parse(html);
+        let Block::Table { header, rows } = &b[0] else { panic!() };
+        assert_eq!(header.len(), 2);
+        assert_eq!(rows.len(), 1);
     }
 }
