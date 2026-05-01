@@ -20,6 +20,104 @@ fn extract_blocks(parent: ElementRef) -> Vec<Block> {
     out
 }
 
+fn is_block_tag(name: &str) -> bool {
+    matches!(name, "p" | "ul" | "ol" | "blockquote" | "table" | "pre" |
+                  "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "hr")
+}
+
+fn extract_li(li: ElementRef) -> Vec<Block> {
+    // If <li> contains any block-level descendants, render mixed: each text-or-inline
+    // run becomes a Paragraph, each block-level element recurses through extract_into.
+    let has_block_child = li
+        .children()
+        .filter_map(ElementRef::wrap)
+        .any(|c| is_block_tag(c.value().name()));
+    if !has_block_child {
+        // Pure inline: one paragraph for the whole <li>.
+        let inl = inline_of(li);
+        if inl.is_empty() {
+            return vec![Block::Paragraph(Inline::empty())];
+        }
+        return vec![Block::Paragraph(inl)];
+    }
+    let mut out = Vec::new();
+    let mut inline_buf: Vec<Inline> = Vec::new();
+    fn flush(buf: &mut Vec<Inline>, out: &mut Vec<Block>) {
+        if !buf.is_empty() {
+            let inl = if buf.len() == 1 { buf.remove(0) } else { Inline::Concat(std::mem::take(buf)) };
+            if !inl.is_empty() {
+                out.push(Block::Paragraph(inl));
+            }
+            buf.clear();
+        }
+    }
+    for child in li.children() {
+        match child.value() {
+            Node::Text(t) => {
+                let s = collapse_ws(&t);
+                if !s.is_empty() { inline_buf.push(Inline::Text(s)); }
+            }
+            Node::Element(_) => {
+                if let Some(ce) = ElementRef::wrap(child) {
+                    if is_block_tag(ce.value().name()) {
+                        flush(&mut inline_buf, &mut out);
+                        extract_into(ce, &mut out);
+                    } else {
+                        let inner_inline = inline_of_single(ce);
+                        if !inner_inline.is_empty() {
+                            inline_buf.push(inner_inline);
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    flush(&mut inline_buf, &mut out);
+    if out.is_empty() {
+        out.push(Block::Paragraph(Inline::empty()));
+    }
+    out
+}
+
+/// Render one element as Inline (handles em/strong/code/a/br/img and falls
+/// back to inline_of for other inline-only tags).
+fn inline_of_single(el: ElementRef) -> Inline {
+    let tag = el.value().name();
+    match tag {
+        "em" | "i" => {
+            let kids = match inline_of(el) {
+                Inline::Concat(v) => v,
+                other => vec![other],
+            };
+            Inline::Emphasis(kids)
+        }
+        "strong" | "b" => {
+            let kids = match inline_of(el) {
+                Inline::Concat(v) => v,
+                other => vec![other],
+            };
+            Inline::Strong(kids)
+        }
+        "code" => Inline::Code(plain_text(el)),
+        "br" => Inline::LineBreak,
+        "a" => {
+            let href = el.value().attr("href").unwrap_or("").to_string();
+            let kids = match inline_of(el) {
+                Inline::Concat(v) => v,
+                other => vec![other],
+            };
+            Inline::Link { href, children: kids }
+        }
+        "img" => Inline::Image {
+            src: el.value().attr("src").unwrap_or("").to_string(),
+            alt: el.value().attr("alt").unwrap_or("").to_string(),
+            title: el.value().attr("title").map(str::to_string),
+        },
+        _ => inline_of(el),
+    }
+}
+
 fn extract_into(el: ElementRef, out: &mut Vec<Block>) {
     let name = el.value().name();
     match name {
@@ -32,6 +130,39 @@ fn extract_into(el: ElementRef, out: &mut Vec<Block>) {
         "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => {
             let level: u8 = name.as_bytes()[1] - b'0';
             out.push(Block::Heading { level, text: inline_of(el) });
+        }
+        "ul" | "ol" => {
+            let ordered = name == "ol";
+            let items: Vec<Vec<Block>> = el
+                .children()
+                .filter_map(ElementRef::wrap)
+                .filter(|c| c.value().name() == "li")
+                .map(extract_li)
+                .collect();
+            out.push(Block::List { ordered, items });
+        }
+        "blockquote" => {
+            let inner = extract_blocks(el);
+            out.push(Block::BlockQuote(inner));
+        }
+        "hr" => out.push(Block::HorizontalRule),
+        "pre" => {
+            let code_el = el
+                .children()
+                .filter_map(ElementRef::wrap)
+                .find(|c| c.value().name() == "code");
+            let lang = code_el
+                .as_ref()
+                .and_then(|c| c.value().attr("class"))
+                .and_then(|cls| {
+                    cls.split_whitespace()
+                        .find_map(|t| t.strip_prefix("language-").map(str::to_string))
+                });
+            let code = match code_el {
+                Some(c) => plain_text(c),
+                None => plain_text(el),
+            };
+            out.push(Block::CodeBlock { lang, code });
         }
         "div" | "span" | "section" | "article" | "header" | "footer" | "main" | "nav" => {
             // Transparent: recurse into children.
@@ -230,5 +361,59 @@ mod tests {
         let b = parse("<html><body><p>a<br/>b</p></body></html>");
         let Block::Paragraph(Inline::Concat(parts)) = &b[0] else { panic!() };
         assert!(matches!(parts[1], Inline::LineBreak));
+    }
+
+    #[test]
+    fn unordered_list() {
+        let b = parse("<html><body><ul><li>a</li><li>b</li></ul></body></html>");
+        assert_eq!(b, vec![Block::List {
+            ordered: false,
+            items: vec![
+                vec![Block::Paragraph(Inline::Text("a".into()))],
+                vec![Block::Paragraph(Inline::Text("b".into()))],
+            ],
+        }]);
+    }
+
+    #[test]
+    fn ordered_list() {
+        let b = parse("<html><body><ol><li>x</li></ol></body></html>");
+        assert!(matches!(b[0], Block::List { ordered: true, .. }));
+    }
+
+    #[test]
+    fn nested_list() {
+        let b = parse("<html><body><ul><li>a<ul><li>b</li></ul></li></ul></body></html>");
+        let Block::List { items, .. } = &b[0] else { panic!() };
+        assert!(matches!(items[0][1], Block::List { .. }));
+    }
+
+    #[test]
+    fn blockquote() {
+        let b = parse("<html><body><blockquote><p>q</p></blockquote></body></html>");
+        assert_eq!(b, vec![Block::BlockQuote(vec![Block::Paragraph(Inline::Text("q".into()))])]);
+    }
+
+    #[test]
+    fn horizontal_rule() {
+        let b = parse("<html><body><hr/></body></html>");
+        assert_eq!(b, vec![Block::HorizontalRule]);
+    }
+
+    #[test]
+    fn pre_code_block_with_language() {
+        let b = parse(
+            r#"<html><body><pre><code class="language-rust">fn main() {}</code></pre></body></html>"#
+        );
+        assert_eq!(b, vec![Block::CodeBlock {
+            lang: Some("rust".into()),
+            code: "fn main() {}".into(),
+        }]);
+    }
+
+    #[test]
+    fn pre_no_code() {
+        let b = parse("<html><body><pre>raw text</pre></body></html>");
+        assert_eq!(b, vec![Block::CodeBlock { lang: None, code: "raw text".into() }]);
     }
 }
