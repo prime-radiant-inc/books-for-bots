@@ -176,8 +176,44 @@ impl Renderer {
                 }
                 self.write_raw("\n");
             }
-            // Tasks 20 will add: CodeBlock, FootnoteDef.
-            _ => { /* placeholder for later tasks */ }
+            Block::CodeBlock { lang, code } => {
+                self.ensure_blank_line();
+                // Find the longest run of backticks anywhere in the code.
+                let mut max_run = 0usize;
+                let mut cur = 0usize;
+                for c in code.chars() {
+                    if c == '`' {
+                        cur += 1;
+                        if cur > max_run { max_run = cur; }
+                    } else {
+                        cur = 0;
+                    }
+                }
+                let fence_len = max_run.max(2) + 1;
+                let fence = "`".repeat(fence_len);
+                self.write_raw(&fence);
+                if let Some(l) = lang { self.write_raw(l); }
+                self.write_raw("\n");
+                self.write_raw(code);
+                if !code.ends_with('\n') { self.write_raw("\n"); }
+                self.write_raw(&fence);
+                self.write_raw("\n\n");
+            }
+            Block::FootnoteDef { id, content } => {
+                self.ensure_blank_line();
+                let mut sub = Renderer::new();
+                for c in content { sub.render_block(c); }
+                let body = sub.buf.trim().to_string();
+                self.write_raw(&format!("[^{id}]: "));
+                // Continuation lines indented by 4 spaces per CommonMark footnotes.
+                let mut first = true;
+                for line in body.split_inclusive('\n') {
+                    if first { first = false; } else { self.write_raw("    "); }
+                    self.write_raw(line);
+                }
+                self.write_raw("\n\n");
+            }
+            // All Block variants are explicitly handled above; no catch-all needed.
         }
     }
 
@@ -381,5 +417,36 @@ mod tests {
             ],
         }]);
         assert!(s.contains("| A | B |\n| --- | --- |\n| 1 | 2 |\n| 3 \\| x | 4 |\n"), "got: {s}");
+    }
+
+    #[test]
+    fn code_block_no_language() {
+        let s = render_one(vec![Block::CodeBlock { lang: None, code: "x = 1".into() }]);
+        assert!(s.contains("```\nx = 1\n```\n"));
+    }
+
+    #[test]
+    fn code_block_with_language() {
+        let s = render_one(vec![Block::CodeBlock { lang: Some("rs".into()), code: "fn main(){}".into() }]);
+        assert!(s.contains("```rs\nfn main(){}\n```\n"));
+    }
+
+    #[test]
+    fn code_block_with_internal_triple_backticks() {
+        let s = render_one(vec![Block::CodeBlock {
+            lang: None,
+            code: "echo \"```\"".into(),
+        }]);
+        // Should use a 4-backtick fence.
+        assert!(s.contains("````\necho \"```\"\n````\n"), "got: {s}");
+    }
+
+    #[test]
+    fn footnote_def() {
+        let s = render_one(vec![Block::FootnoteDef {
+            id: "c1-fn1".into(),
+            content: vec![Block::Paragraph(Inline::Text("Note.".into()))],
+        }]);
+        assert!(s.contains("[^c1-fn1]: Note.\n"), "got: {s}");
     }
 }
