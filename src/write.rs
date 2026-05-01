@@ -27,7 +27,6 @@ pub fn convert(args: &Args) -> Result<()> {
 
     // 2. Extract each spine doc into Blocks; resolve title; collect footnotes.
     let mut chapters: Vec<Chapter> = Vec::with_capacity(book.spine.len());
-    let mut path_to_chapter: BTreeMap<String, usize> = BTreeMap::new();
     for (i, doc) in book.spine.iter().enumerate() {
         let mut blocks = crate::extract::parse(&doc.html);
         let html_title = parse_html_title(&doc.html);
@@ -39,10 +38,9 @@ pub fn convert(args: &Args) -> Result<()> {
         );
         let n = i + 1;
         namespace_chapter(&mut blocks, n);
-        path_to_chapter.insert(doc.manifest_path.clone(), n);
         chapters.push(Chapter { number: n, title, source_path: doc.manifest_path.clone(), blocks });
     }
-    rewrite_internal_links(&mut chapters, &path_to_chapter);
+    rewrite_internal_links(&mut chapters);
 
     // 3. Resolve image basenames, rewrite image src refs.
     //    Hard-errors if any chapter references an image not in the manifest.

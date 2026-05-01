@@ -169,60 +169,58 @@ mod ns_tests {
 
 use std::collections::BTreeMap;
 
-/// Rewrite cross-document hrefs to in-file anchors.
+/// Rewrite cross-document hrefs to in-file anchors using heading auto-slugs.
 ///
-/// `path_to_chapter`: manifest_path → chapter number.
-/// In-document links (`#foo` with no path) are rewritten to `#c{n}-foo` for the
-/// chapter that owns the link. Links to other chapters' files are rewritten to
-/// `#c{m}-bar` (or `#chapter-{m}` for a bare-document href).
-pub fn rewrite_internal_links(
-    chapters: &mut [Chapter],
-    path_to_chapter: &BTreeMap<String, usize>,
-) {
+/// - Within-doc fragments (`#foo`) → unchanged. Will resolve only if the
+///   target was a heading and `foo` matches its auto-slug.
+/// - Cross-doc with fragment (`b.xhtml#foo`) → `#<target chapter slug>`.
+///   The deeper fragment is dropped; agents seek to the target chapter via
+///   the YAML offsets and read for the named anchor's surrounding text.
+/// - Cross-doc no fragment (`b.xhtml`) → `#<target chapter slug>`.
+/// - External URLs (http, https, mailto) → unchanged.
+pub fn rewrite_internal_links(chapters: &mut [Chapter]) {
+    let path_to_slug = build_chapter_slug_map(chapters);
     for chap in chapters.iter_mut() {
-        let owning = chap.number;
         let owning_dir = std::path::Path::new(&chap.source_path)
             .parent()
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_default();
         for b in chap.blocks.iter_mut() {
-            rewrite_links_in_block(b, owning, &owning_dir, path_to_chapter);
+            rewrite_links_in_block(b, &owning_dir, &path_to_slug);
         }
     }
 }
 
 fn rewrite_links_in_block(
     b: &mut Block,
-    owning: usize,
     owning_dir: &str,
-    map: &BTreeMap<String, usize>,
+    map: &BTreeMap<String, String>,
 ) {
     match b {
-        Block::Heading { text, .. } | Block::Paragraph(text) => rewrite_links_in_inline(text, owning, owning_dir, map),
-        Block::BlockQuote(c) => for x in c { rewrite_links_in_block(x, owning, owning_dir, map); },
-        Block::List { items, .. } => for item in items { for x in item { rewrite_links_in_block(x, owning, owning_dir, map); } },
+        Block::Heading { text, .. } | Block::Paragraph(text) => rewrite_links_in_inline(text, owning_dir, map),
+        Block::BlockQuote(c) => for x in c { rewrite_links_in_block(x, owning_dir, map); },
+        Block::List { items, .. } => for item in items { for x in item { rewrite_links_in_block(x, owning_dir, map); } },
         Block::Table { header, rows } => {
-            for c in header { rewrite_links_in_inline(c, owning, owning_dir, map); }
-            for r in rows { for c in r { rewrite_links_in_inline(c, owning, owning_dir, map); } }
+            for c in header { rewrite_links_in_inline(c, owning_dir, map); }
+            for r in rows { for c in r { rewrite_links_in_inline(c, owning_dir, map); } }
         }
-        Block::FootnoteDef { content, .. } => for c in content { rewrite_links_in_block(c, owning, owning_dir, map); },
+        Block::FootnoteDef { content, .. } => for c in content { rewrite_links_in_block(c, owning_dir, map); },
         _ => {}
     }
 }
 
 fn rewrite_links_in_inline(
     i: &mut Inline,
-    owning: usize,
     owning_dir: &str,
-    map: &BTreeMap<String, usize>,
+    map: &BTreeMap<String, String>,
 ) {
     match i {
         Inline::Link { href, children } => {
-            *href = rewrite_one_href(href, owning, owning_dir, map);
-            for c in children { rewrite_links_in_inline(c, owning, owning_dir, map); }
+            *href = rewrite_one_href(href, owning_dir, map);
+            for c in children { rewrite_links_in_inline(c, owning_dir, map); }
         }
         Inline::Concat(xs) | Inline::Emphasis(xs) | Inline::Strong(xs) => {
-            for x in xs { rewrite_links_in_inline(x, owning, owning_dir, map); }
+            for x in xs { rewrite_links_in_inline(x, owning_dir, map); }
         }
         _ => {}
     }
@@ -230,20 +228,19 @@ fn rewrite_links_in_inline(
 
 fn rewrite_one_href(
     href: &str,
-    owning: usize,
     owning_dir: &str,
-    map: &BTreeMap<String, usize>,
+    map: &BTreeMap<String, String>,
 ) -> String {
     if href.is_empty() { return href.to_string(); }
     if href.starts_with("http://") || href.starts_with("https://") || href.starts_with("mailto:") {
         return href.to_string();
     }
-    if let Some(frag) = href.strip_prefix('#') {
-        return format!("#c{owning}-{frag}");
+    if href.starts_with('#') {
+        return href.to_string();
     }
-    let (path_part, frag_part) = match href.split_once('#') {
-        Some((p, f)) => (p.to_string(), Some(f.to_string())),
-        None => (href.to_string(), None),
+    let path_part = match href.split_once('#') {
+        Some((p, _f)) => p.to_string(),
+        None => href.to_string(),
     };
     let resolved = if owning_dir.is_empty() {
         path_part.clone()
@@ -251,14 +248,37 @@ fn rewrite_one_href(
         format!("{owning_dir}/{path_part}")
     };
     let normalized = normalize_path(&resolved);
-    if let Some(&target) = map.get(&normalized) {
-        match frag_part {
-            Some(f) => format!("#c{target}-{f}"),
-            None => format!("#chapter-{target}"),
-        }
+    if let Some(target_slug) = map.get(&normalized) {
+        format!("#{target_slug}")
     } else {
         href.to_string()
     }
+}
+
+/// GFM-style heading auto-slug: lowercase, drop non-alphanumeric/space/hyphen/underscore,
+/// then replace spaces with hyphens. Collisions resolved by appending -1, -2, etc.
+fn auto_slug(s: &str) -> String {
+    s.to_lowercase()
+        .chars()
+        .filter(|c| c.is_alphanumeric() || *c == ' ' || *c == '-' || *c == '_')
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join("-")
+}
+
+/// Build path → unique-slug map. Collisions on slug get -1, -2 suffixes.
+fn build_chapter_slug_map(chapters: &[Chapter]) -> BTreeMap<String, String> {
+    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+    let mut out: BTreeMap<String, String> = BTreeMap::new();
+    for ch in chapters {
+        let base = auto_slug(&ch.title);
+        let cnt = counts.entry(base.clone()).or_insert(0);
+        let slug = if *cnt == 0 { base.clone() } else { format!("{base}-{cnt}") };
+        *cnt += 1;
+        out.insert(ch.source_path.clone(), slug);
+    }
+    out
 }
 
 fn normalize_path(p: &str) -> String {
@@ -285,39 +305,57 @@ mod link_tests {
     }
 
     #[test]
-    fn intra_doc_fragment() {
+    fn intra_doc_fragment_unchanged() {
         let mut chap = Chapter { number: 4, title: "T".into(), source_path: "OEBPS/c.xhtml".into(), blocks: vec![p_link("#sec1")] };
-        let map: BTreeMap<String, usize> = BTreeMap::new();
-        rewrite_internal_links(std::slice::from_mut(&mut chap), &map);
+        rewrite_internal_links(std::slice::from_mut(&mut chap));
         let Block::Paragraph(Inline::Link { href, .. }) = &chap.blocks[0] else { panic!() };
-        assert_eq!(href, "#c4-sec1");
+        assert_eq!(href, "#sec1");
     }
 
     #[test]
-    fn cross_doc_with_fragment() {
-        let mut chap = Chapter { number: 2, title: "T".into(), source_path: "OEBPS/a.xhtml".into(), blocks: vec![p_link("b.xhtml#foo")] };
-        let mut map = BTreeMap::new();
-        map.insert("OEBPS/b.xhtml".to_string(), 5);
-        rewrite_internal_links(std::slice::from_mut(&mut chap), &map);
-        let Block::Paragraph(Inline::Link { href, .. }) = &chap.blocks[0] else { panic!() };
-        assert_eq!(href, "#c5-foo");
+    fn cross_doc_with_fragment_uses_target_slug() {
+        let a = Chapter { number: 1, title: "First".into(), source_path: "OEBPS/a.xhtml".into(), blocks: vec![p_link("b.xhtml#foo")] };
+        let b = Chapter { number: 2, title: "Second Chapter".into(), source_path: "OEBPS/b.xhtml".into(), blocks: vec![] };
+        let mut chs = vec![a, b];
+        rewrite_internal_links(&mut chs);
+        let Block::Paragraph(Inline::Link { href, .. }) = &chs[0].blocks[0] else { panic!() };
+        assert_eq!(href, "#second-chapter");
     }
 
     #[test]
-    fn cross_doc_no_fragment() {
-        let mut chap = Chapter { number: 2, title: "T".into(), source_path: "OEBPS/a.xhtml".into(), blocks: vec![p_link("b.xhtml")] };
-        let mut map = BTreeMap::new();
-        map.insert("OEBPS/b.xhtml".to_string(), 5);
-        rewrite_internal_links(std::slice::from_mut(&mut chap), &map);
-        let Block::Paragraph(Inline::Link { href, .. }) = &chap.blocks[0] else { panic!() };
-        assert_eq!(href, "#chapter-5");
+    fn cross_doc_no_fragment_uses_target_slug() {
+        let a = Chapter { number: 1, title: "A".into(), source_path: "OEBPS/a.xhtml".into(), blocks: vec![p_link("b.xhtml")] };
+        let b = Chapter { number: 2, title: "Chapter Five".into(), source_path: "OEBPS/b.xhtml".into(), blocks: vec![] };
+        let mut chs = vec![a, b];
+        rewrite_internal_links(&mut chs);
+        let Block::Paragraph(Inline::Link { href, .. }) = &chs[0].blocks[0] else { panic!() };
+        assert_eq!(href, "#chapter-five");
     }
 
     #[test]
     fn external_unchanged() {
         let mut chap = Chapter { number: 1, title: "T".into(), source_path: "x".into(), blocks: vec![p_link("https://example.com")] };
-        rewrite_internal_links(std::slice::from_mut(&mut chap), &BTreeMap::new());
+        rewrite_internal_links(std::slice::from_mut(&mut chap));
         let Block::Paragraph(Inline::Link { href, .. }) = &chap.blocks[0] else { panic!() };
         assert_eq!(href, "https://example.com");
+    }
+
+    #[test]
+    fn duplicate_titles_get_collision_suffix() {
+        let a = Chapter { number: 1, title: "Chapter".into(), source_path: "a".into(), blocks: vec![p_link("b#x")] };
+        let b = Chapter { number: 2, title: "Chapter".into(), source_path: "b".into(), blocks: vec![] };
+        let mut chs = vec![a, b];
+        rewrite_internal_links(&mut chs);
+        let Block::Paragraph(Inline::Link { href, .. }) = &chs[0].blocks[0] else { panic!() };
+        // First "Chapter" → "chapter", second → "chapter-1".
+        assert_eq!(href, "#chapter-1");
+    }
+
+    #[test]
+    fn slug_handles_punctuation_and_unicode() {
+        // "Step 1. Understand the Customer" → "step-1-understand-the-customer"
+        assert_eq!(auto_slug("Step 1. Understand the Customer"), "step-1-understand-the-customer");
+        // Double spaces, dashes preserved, em-dash dropped.
+        assert_eq!(auto_slug("Hello — World"), "hello-world");
     }
 }

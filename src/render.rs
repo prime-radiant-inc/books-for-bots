@@ -72,10 +72,9 @@ impl Renderer {
     }
 
     fn start_chapter(&mut self, number: usize, title: &str) {
+        let _ = number; // chapter number is used by upstream namespacing, not by render
         self.ensure_blank_line();
-        // Anchor first, on its own line.
-        self.write_raw(&format!("<a id=\"chapter-{number}\"></a>\n"));
-        // Record offset at the start of the heading line.
+        // Record offset at the heading line.
         self.offsets.push(ChapterOffset { byte: self.current_byte(), line: self.line });
         self.write_raw(&format!("## {title}\n\n"));
     }
@@ -110,9 +109,9 @@ impl Renderer {
                 }
                 self.write_raw("\n\n");
             }
-            Block::Anchor { id } => {
-                self.ensure_blank_line();
-                self.write_raw(&format!("<a id=\"{id}\"></a>\n"));
+            Block::Anchor { .. } => {
+                // No-op: explicit IDs aren't markdown-native. Within-doc links
+                // resolve via heading auto-slugs in conformant renderers.
             }
             Block::Image { src, alt, title } => {
                 self.ensure_blank_line();
@@ -279,9 +278,9 @@ mod tests {
     }
 
     #[test]
-    fn chapter_anchor_and_heading() {
+    fn chapter_heading_no_anchor() {
         let s = render_one(vec![]);
-        assert!(s.starts_with("<a id=\"chapter-1\"></a>\n## T\n\n"));
+        assert!(s.starts_with("## T\n\n"), "got: {s}");
     }
 
     #[test]

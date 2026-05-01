@@ -2,12 +2,34 @@ use crate::block::{Block, Inline};
 use scraper::{Html, Node, ElementRef};
 
 pub fn parse(html: &str) -> Vec<Block> {
-    let doc = Html::parse_document(html);
+    let cleaned = strip_head(html);
+    let doc = Html::parse_document(&cleaned);
     let body = doc
         .select(&scraper::Selector::parse("body").unwrap())
         .next()
         .unwrap_or_else(|| doc.root_element());
     extract_blocks(body)
+}
+
+fn strip_head(html: &str) -> String {
+    // XHTML lets <script>/<style> be self-closing; HTML5's parser doesn't,
+    // and treats <script /> as opening a raw-text element that consumes the
+    // rest of the document. Drop the entire <head>…</head> to avoid this.
+    // The load module already extracted what it needs (title, etc.) from
+    // metadata; we don't render anything from the head here.
+    if let Some(start) = html.find("<head") {
+        if let Some(open_end) = html[start..].find('>') {
+            let after_open = start + open_end + 1;
+            if let Some(close_off) = html[after_open..].find("</head>") {
+                let after_close = after_open + close_off + "</head>".len();
+                let mut out = String::with_capacity(html.len());
+                out.push_str(&html[..start]);
+                out.push_str(&html[after_close..]);
+                return out;
+            }
+        }
+    }
+    html.to_string()
 }
 
 fn extract_blocks(parent: ElementRef) -> Vec<Block> {
@@ -131,19 +153,6 @@ fn inline_of_single(el: ElementRef) -> Inline {
 
 fn extract_into(el: ElementRef, out: &mut Vec<Block>) {
     let name = el.value().name();
-
-    // Capture id attribute if it's NOT on a heading. Headings get their
-    // own anchor scheme (chapter-N-foo) at render time.
-    // Also skip for footnote containers, which handle their own id.
-    let is_heading = matches!(name, "h1" | "h2" | "h3" | "h4" | "h5" | "h6");
-    let is_footnote_container_el = (name == "aside" || name == "div") && is_footnote_container(el);
-    if !is_heading && !is_footnote_container_el {
-        if let Some(id) = el.value().attr("id") {
-            if !id.is_empty() {
-                out.push(Block::Anchor { id: id.to_string() });
-            }
-        }
-    }
 
     match name {
         "p" => {
@@ -564,19 +573,16 @@ mod tests {
     }
 
     #[test]
-    fn id_on_paragraph_yields_anchor_block() {
-        let html = r#"<html><body><p id="sec1">Body.</p></body></html>"#;
+    fn xhtml_self_closing_script_does_not_eat_body() {
+        let html = r#"<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <title>Chapter</title>
+  <script type="text/javascript" src="kobo.js" />
+  <style type="text/css" id="x">.x{}</style>
+</head>
+<body><p>Body content here.</p></body></html>"#;
         let b = parse(html);
-        assert_eq!(b, vec![
-            Block::Anchor { id: "sec1".into() },
-            Block::Paragraph(Inline::Text("Body.".into())),
-        ]);
-    }
-
-    #[test]
-    fn id_on_heading_does_not_yield_anchor() {
-        let html = r#"<html><body><h2 id="x">Title</h2></body></html>"#;
-        let b = parse(html);
-        assert_eq!(b, vec![Block::Heading { level: 2, text: Inline::Text("Title".into()) }]);
+        assert_eq!(b, vec![Block::Paragraph(Inline::Text("Body content here.".into()))]);
     }
 }
