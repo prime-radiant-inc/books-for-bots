@@ -103,11 +103,22 @@ fn inline_of_single(el: ElementRef) -> Inline {
         "br" => Inline::LineBreak,
         "a" => {
             let href = el.value().attr("href").unwrap_or("").to_string();
-            let kids = match inline_of(el) {
-                Inline::Concat(v) => v,
-                other => vec![other],
-            };
-            Inline::Link { href, children: kids }
+            let is_noteref = el
+                .value()
+                .attr("epub:type")
+                .map(|t| t.contains("noteref"))
+                .unwrap_or(false)
+                || (href.starts_with('#') && parent_is_sup(el));
+            if is_noteref {
+                let id = href.trim_start_matches('#').to_string();
+                Inline::FootnoteRef(id)
+            } else {
+                let kids = match inline_of(el) {
+                    Inline::Concat(v) => v,
+                    other => vec![other],
+                };
+                Inline::Link { href, children: kids }
+            }
         }
         "img" => Inline::Image {
             src: el.value().attr("src").unwrap_or("").to_string(),
@@ -192,7 +203,17 @@ fn extract_into(el: ElementRef, out: &mut Vec<Block>) {
             };
             out.push(Block::CodeBlock { lang, code });
         }
-        "div" | "span" | "section" | "article" | "header" | "footer" | "main" | "nav" => {
+        "aside" if is_footnote_container(el) => {
+            let id = el.value().attr("id").unwrap_or("").to_string();
+            let content = extract_blocks(el);
+            out.push(Block::FootnoteDef { id, content });
+        }
+        "div" if is_footnote_container(el) => {
+            let id = el.value().attr("id").unwrap_or("").to_string();
+            let content = extract_blocks(el);
+            out.push(Block::FootnoteDef { id, content });
+        }
+        "div" | "aside" | "span" | "section" | "article" | "header" | "footer" | "main" | "nav" => {
             // Transparent: recurse into children.
             for child in el.children() {
                 if let Some(ce) = ElementRef::wrap(child) {
@@ -243,11 +264,22 @@ fn inline_of(el: ElementRef) -> Inline {
                         "br" => Inline::LineBreak,
                         "a" => {
                             let href = ce.value().attr("href").unwrap_or("").to_string();
-                            let kids = match inline_of(ce) {
-                                Inline::Concat(v) => v,
-                                other => vec![other],
-                            };
-                            Inline::Link { href, children: kids }
+                            let is_noteref = ce
+                                .value()
+                                .attr("epub:type")
+                                .map(|t| t.contains("noteref"))
+                                .unwrap_or(false)
+                                || (href.starts_with('#') && parent_is_sup(ce));
+                            if is_noteref {
+                                let id = href.trim_start_matches('#').to_string();
+                                Inline::FootnoteRef(id)
+                            } else {
+                                let kids = match inline_of(ce) {
+                                    Inline::Concat(v) => v,
+                                    other => vec![other],
+                                };
+                                Inline::Link { href, children: kids }
+                            }
                         }
                         "img" => {
                             let src = ce.value().attr("src").unwrap_or("").to_string();
@@ -300,6 +332,22 @@ fn plain_text(el: ElementRef) -> String {
         }
     }
     s
+}
+
+fn parent_is_sup(el: ElementRef) -> bool {
+    el.parent()
+        .and_then(ElementRef::wrap)
+        .map(|p| p.value().name() == "sup")
+        .unwrap_or(false)
+}
+
+fn is_footnote_container(el: ElementRef) -> bool {
+    let v = el.value();
+    let is_aside_footnote = v.name() == "aside"
+        && v.attr("epub:type").map(|t| t.contains("footnote")).unwrap_or(false);
+    let is_div_footnote = v.name() == "div"
+        && v.attr("class").map(|c| c.split_whitespace().any(|t| t == "footnote")).unwrap_or(false);
+    is_aside_footnote || is_div_footnote
 }
 
 fn collapse_ws(s: &str) -> String {
@@ -473,5 +521,31 @@ mod tests {
         let Block::Table { header, rows } = &b[0] else { panic!() };
         assert_eq!(header.len(), 2);
         assert_eq!(rows.len(), 1);
+    }
+
+    #[test]
+    fn noteref_with_epub_type() {
+        let html = r##"<html><body><p>See<a epub:type="noteref" href="#fn1">1</a>.</p></body></html>"##;
+        let b = parse(html);
+        let Block::Paragraph(Inline::Concat(parts)) = &b[0] else { panic!() };
+        assert!(parts.iter().any(|i| matches!(i, Inline::FootnoteRef(s) if s == "fn1")));
+    }
+
+    #[test]
+    fn sup_anchor_is_noteref() {
+        let html = r##"<html><body><p>x<sup><a href="#fn2">2</a></sup>.</p></body></html>"##;
+        let b = parse(html);
+        let Block::Paragraph(Inline::Concat(parts)) = &b[0] else { panic!() };
+        assert!(parts.iter().any(|i| matches!(i, Inline::FootnoteRef(s) if s == "fn2")));
+    }
+
+    #[test]
+    fn footnote_def_aside() {
+        let html = r##"<html><body><aside epub:type="footnote" id="fn1"><p>Note one.</p></aside></body></html>"##;
+        let b = parse(html);
+        assert_eq!(b.len(), 1);
+        let Block::FootnoteDef { id, content } = &b[0] else { panic!() };
+        assert_eq!(id, "fn1");
+        assert_eq!(content, &vec![Block::Paragraph(Inline::Text("Note one.".into()))]);
     }
 }
