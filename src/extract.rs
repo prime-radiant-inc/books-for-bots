@@ -131,6 +131,20 @@ fn inline_of_single(el: ElementRef) -> Inline {
 
 fn extract_into(el: ElementRef, out: &mut Vec<Block>) {
     let name = el.value().name();
+
+    // Capture id attribute if it's NOT on a heading. Headings get their
+    // own anchor scheme (chapter-N-foo) at render time.
+    // Also skip for footnote containers, which handle their own id.
+    let is_heading = matches!(name, "h1" | "h2" | "h3" | "h4" | "h5" | "h6");
+    let is_footnote_container_el = (name == "aside" || name == "div") && is_footnote_container(el);
+    if !is_heading && !is_footnote_container_el {
+        if let Some(id) = el.value().attr("id") {
+            if !id.is_empty() {
+                out.push(Block::Anchor { id: id.to_string() });
+            }
+        }
+    }
+
     match name {
         "p" => {
             let inl = inline_of(el);
@@ -547,5 +561,22 @@ mod tests {
         let Block::FootnoteDef { id, content } = &b[0] else { panic!() };
         assert_eq!(id, "fn1");
         assert_eq!(content, &vec![Block::Paragraph(Inline::Text("Note one.".into()))]);
+    }
+
+    #[test]
+    fn id_on_paragraph_yields_anchor_block() {
+        let html = r#"<html><body><p id="sec1">Body.</p></body></html>"#;
+        let b = parse(html);
+        assert_eq!(b, vec![
+            Block::Anchor { id: "sec1".into() },
+            Block::Paragraph(Inline::Text("Body.".into())),
+        ]);
+    }
+
+    #[test]
+    fn id_on_heading_does_not_yield_anchor() {
+        let html = r#"<html><body><h2 id="x">Title</h2></body></html>"#;
+        let b = parse(html);
+        assert_eq!(b, vec![Block::Heading { level: 2, text: Inline::Text("Title".into()) }]);
     }
 }
