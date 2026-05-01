@@ -35,7 +35,12 @@ pub fn render(chapters: &[ChapterToRender<'_>]) -> RenderResult {
     let mut r = Renderer::new();
     for ch in chapters {
         r.start_chapter(ch.number, ch.title);
-        for b in ch.blocks {
+        let blocks_to_render: &[Block] = if first_heading_matches_title(ch.blocks, ch.title) {
+            &ch.blocks[1..]
+        } else {
+            ch.blocks
+        };
+        for b in blocks_to_render {
             r.render_block(b);
         }
         if !ch.footnotes.is_empty() {
@@ -46,6 +51,27 @@ pub fn render(chapters: &[ChapterToRender<'_>]) -> RenderResult {
         }
     }
     RenderResult { body: r.buf, chapter_offsets: r.offsets }
+}
+
+fn first_heading_matches_title(blocks: &[Block], title: &str) -> bool {
+    let Some(first) = blocks.first() else { return false; };
+    let Block::Heading { level, text } = first else { return false; };
+    if *level > 2 { return false; }
+    inline_to_text(text).trim() == title.trim()
+}
+
+fn inline_to_text(i: &Inline) -> String {
+    match i {
+        Inline::Text(s) => s.clone(),
+        Inline::Concat(xs) | Inline::Emphasis(xs) | Inline::Strong(xs) => {
+            xs.iter().map(inline_to_text).collect()
+        }
+        Inline::Link { children, .. } => children.iter().map(inline_to_text).collect(),
+        Inline::Code(s) => s.clone(),
+        Inline::Image { alt, .. } => alt.clone(),
+        Inline::FootnoteRef(_) => String::new(),
+        Inline::LineBreak => " ".to_string(),
+    }
 }
 
 struct Renderer {
@@ -92,7 +118,7 @@ impl Renderer {
                 let shifted = (*level + 1).min(6);
                 let hashes = "#".repeat(shifted as usize);
                 self.write_raw(&format!("{hashes} "));
-                self.render_inline(text);
+                self.render_inline_for_heading(text);
                 self.write_raw("\n\n");
             }
             Block::HorizontalRule => {
@@ -258,6 +284,44 @@ impl Renderer {
             }
             Inline::FootnoteRef(id) => self.write_raw(&format!("[^{id}]")),
             Inline::LineBreak => self.write_raw("  \n"),
+        }
+    }
+
+    fn render_inline_for_heading(&mut self, i: &Inline) {
+        match i {
+            Inline::Text(s) => self.write_raw(s),
+            Inline::Concat(xs) => for x in xs { self.render_inline_for_heading(x); },
+            Inline::Emphasis(xs) => {
+                self.write_raw("*");
+                for x in xs { self.render_inline_for_heading(x); }
+                self.write_raw("*");
+            }
+            Inline::Strong(xs) => {
+                self.write_raw("**");
+                for x in xs { self.render_inline_for_heading(x); }
+                self.write_raw("**");
+            }
+            Inline::Code(s) => {
+                let fence = backtick_fence_for(s);
+                self.write_raw(&fence);
+                if s.starts_with('`') { self.write_raw(" "); }
+                self.write_raw(s);
+                if s.ends_with('`') { self.write_raw(" "); }
+                self.write_raw(&fence);
+            }
+            Inline::Link { href, children } => {
+                self.write_raw("[");
+                for c in children { self.render_inline_for_heading(c); }
+                self.write_raw(&format!("]({href})"));
+            }
+            Inline::Image { src, alt, title } => {
+                match title {
+                    Some(t) => self.write_raw(&format!(r#"![{alt}]({src} "{t}")"#)),
+                    None => self.write_raw(&format!("![{alt}]({src})")),
+                }
+            }
+            Inline::FootnoteRef(id) => self.write_raw(&format!("[^{id}]")),
+            Inline::LineBreak => self.write_raw(" "), // replace hard break with space in headings
         }
     }
 }
@@ -447,5 +511,54 @@ mod tests {
             content: vec![Block::Paragraph(Inline::Text("Note.".into()))],
         }]);
         assert!(s.contains("[^c1-fn1]: Note.\n"), "got: {s}");
+    }
+
+    #[test]
+    fn first_heading_matching_title_is_skipped() {
+        let blocks = [
+            Block::Heading { level: 1, text: Inline::Text("Cover".into()) },
+            Block::Paragraph(Inline::Text("body".into())),
+        ];
+        let chs = vec![ChapterToRender {
+            number: 1,
+            title: "Cover",
+            blocks: &blocks,
+            footnotes: &[],
+        }];
+        let body = render(&chs).body;
+        // Should contain "## Cover" exactly once, then "body".
+        assert_eq!(body.matches("## Cover").count(), 1, "got: {body}");
+        assert!(body.contains("body"));
+    }
+
+    #[test]
+    fn first_heading_not_matching_title_is_kept() {
+        let blocks = [
+            Block::Heading { level: 1, text: Inline::Text("Different Heading".into()) },
+        ];
+        let chs = vec![ChapterToRender {
+            number: 1,
+            title: "Cover",
+            blocks: &blocks,
+            footnotes: &[],
+        }];
+        let body = render(&chs).body;
+        // Both headings appear: "## Cover" (auto) and "## Different Heading" (h1 shifted).
+        assert!(body.contains("## Cover"), "got: {body}");
+        assert!(body.contains("## Different Heading"), "got: {body}");
+    }
+
+    #[test]
+    fn linebreak_in_heading_becomes_space() {
+        let s = render_one(vec![Block::Heading {
+            level: 1,
+            text: Inline::Concat(vec![
+                Inline::Text("Title".into()),
+                Inline::LineBreak,
+                Inline::Text("subtitle".into()),
+            ]),
+        }]);
+        assert!(s.contains("## Title subtitle\n"), "got: {s}");
+        assert!(!s.contains("Title  \n"), "should not have hard break in heading; got: {s}");
     }
 }

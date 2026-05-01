@@ -257,6 +257,35 @@ fn extract_into(el: ElementRef, out: &mut Vec<Block>) {
     }
 }
 
+fn dedupe_consecutive_breaks(i: Inline) -> Inline {
+    match i {
+        Inline::Concat(xs) => {
+            let mut out: Vec<Inline> = Vec::with_capacity(xs.len());
+            for x in xs {
+                let x = dedupe_consecutive_breaks(x);
+                if matches!(x, Inline::LineBreak) {
+                    if matches!(out.last(), Some(Inline::LineBreak)) {
+                        continue;
+                    }
+                }
+                out.push(x);
+            }
+            match out.len() {
+                0 => Inline::empty(),
+                1 => out.into_iter().next().unwrap(),
+                _ => Inline::Concat(out),
+            }
+        }
+        Inline::Emphasis(xs) => Inline::Emphasis(xs.into_iter().map(dedupe_consecutive_breaks).collect()),
+        Inline::Strong(xs) => Inline::Strong(xs.into_iter().map(dedupe_consecutive_breaks).collect()),
+        Inline::Link { href, children } => Inline::Link {
+            href,
+            children: children.into_iter().map(dedupe_consecutive_breaks).collect(),
+        },
+        other => other,
+    }
+}
+
 fn inline_of(el: ElementRef, has_outer_prior: bool) -> Inline {
     let mut parts = Vec::new();
     for child in el.children() {
@@ -328,11 +357,12 @@ fn inline_of(el: ElementRef, has_outer_prior: bool) -> Inline {
             _ => {}
         }
     }
-    match parts.len() {
+    let result = match parts.len() {
         0 => Inline::empty(),
         1 => parts.into_iter().next().unwrap(),
         _ => Inline::Concat(parts),
-    }
+    };
+    dedupe_consecutive_breaks(result)
 }
 
 /// Collapse whitespace for inline text nodes.
@@ -618,6 +648,16 @@ mod tests {
                 panic!("unexpected Link with href={href:?}");
             }
         }
+    }
+
+    #[test]
+    fn consecutive_brs_collapse_to_one_linebreak() {
+        let html = r#"<html><body><p>a<br/><br/><br/>b</p></body></html>"#;
+        let b = parse(html);
+        let Block::Paragraph(Inline::Concat(parts)) = &b[0] else { panic!("got: {b:?}") };
+        // a, LineBreak, b — only one LineBreak between a and b.
+        let lb_count = parts.iter().filter(|i| matches!(i, Inline::LineBreak)).count();
+        assert_eq!(lb_count, 1, "expected 1 LineBreak; got: {parts:?}");
     }
 
     #[test]
