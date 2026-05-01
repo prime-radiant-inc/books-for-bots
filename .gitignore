@@ -1,0 +1,17 @@
+# Rust build artifacts
+/target/
+**/*.rs.bk
+Cargo.lock.bak
+
+# Copyrighted material — never commit input epubs or their converted output.
+# Tests use synthetic fixtures under tests/fixtures/ instead.
+*.epub
+/output/
+/books/
+
+# Editor / OS noise
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
