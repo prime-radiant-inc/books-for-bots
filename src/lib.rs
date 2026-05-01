@@ -3,6 +3,7 @@
 pub use error::Error;
 
 pub mod block;
+pub mod extract;
 pub mod images;
 pub mod load;
 pub mod slug;
