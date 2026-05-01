@@ -153,9 +153,39 @@ impl Renderer {
                 }
                 self.write_raw("\n");
             }
-            // Tasks 19-20 will add: Table, CodeBlock, FootnoteDef.
+            Block::Table { header, rows } => {
+                self.ensure_blank_line();
+                self.write_raw("| ");
+                for (i, h) in header.iter().enumerate() {
+                    if i > 0 { self.write_raw(" | "); }
+                    self.render_cell(h);
+                }
+                self.write_raw(" |\n| ");
+                for i in 0..header.len() {
+                    if i > 0 { self.write_raw(" | "); }
+                    self.write_raw("---");
+                }
+                self.write_raw(" |\n");
+                for row in rows {
+                    self.write_raw("| ");
+                    for (i, c) in row.iter().enumerate() {
+                        if i > 0 { self.write_raw(" | "); }
+                        self.render_cell(c);
+                    }
+                    self.write_raw(" |\n");
+                }
+                self.write_raw("\n");
+            }
+            // Tasks 20 will add: CodeBlock, FootnoteDef.
             _ => { /* placeholder for later tasks */ }
         }
+    }
+
+    fn render_cell(&mut self, i: &Inline) {
+        let mut tmp = Renderer::new();
+        tmp.render_inline(i);
+        let escaped = tmp.buf.replace('\n', "<br>").replace('|', "\\|");
+        self.write_raw(&escaped);
     }
 
     fn render_inline(&mut self, i: &Inline) {
@@ -339,5 +369,17 @@ mod tests {
             ]],
         }]);
         assert!(s.contains("- outer\n  - inner\n"), "got: {s}");
+    }
+
+    #[test]
+    fn pipe_table() {
+        let s = render_one(vec![Block::Table {
+            header: vec![Inline::Text("A".into()), Inline::Text("B".into())],
+            rows: vec![
+                vec![Inline::Text("1".into()), Inline::Text("2".into())],
+                vec![Inline::Text("3 | x".into()), Inline::Text("4".into())],
+            ],
+        }]);
+        assert!(s.contains("| A | B |\n| --- | --- |\n| 1 | 2 |\n| 3 \\| x | 4 |\n"), "got: {s}");
     }
 }
