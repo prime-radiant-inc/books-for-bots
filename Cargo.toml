@@ -1,0 +1,26 @@
+[package]
+name = "books-for-bots"
+version = "0.1.0"
+edition = "2021"
+description = "Convert EPUB to YAML-headed markdown with chapter offsets, for token-efficient agent reading"
+license = "MIT"
+
+[[bin]]
+name = "books-for-bots"
+path = "src/main.rs"
+
+[lib]
+name = "books_for_bots"
+path = "src/lib.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+epub = "2"
+scraper = "0.20"
+slug = "0.1"
+thiserror = "1"
+
+[dev-dependencies]
+epub-builder = "0.7"
+insta = "1"
+tempfile = "3"
