@@ -4,19 +4,20 @@ pub use error::Error;
 
 pub mod assemble;
 pub mod block;
+pub mod cli;
 pub mod extract;
 pub mod frontmatter;
 pub mod images;
 pub mod load;
 pub mod render;
 pub mod slug;
-mod cli;
+pub mod write;
 mod error;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
 pub fn run_from_args() -> Result<()> {
     use clap::Parser;
-    let _args = cli::Args::parse();
-    Err(Error::NotImplemented)
+    let args = cli::Args::parse();
+    write::convert(&args)
 }
