@@ -55,10 +55,12 @@ pub fn render(chapters: &[ChapterToRender<'_>]) -> RenderResult {
     let mut r = Renderer::new();
     for ch in chapters {
         r.start_chapter(ch.number, ch.title);
-        let blocks_to_render: &[Block] = if first_heading_matches_title(ch.blocks, ch.title) {
-            &ch.blocks[1..]
-        } else {
-            ch.blocks
+        let blocks_to_render: Vec<&Block> = match find_first_matching_heading(ch.blocks, ch.title) {
+            Some(skip_idx) => ch.blocks.iter().enumerate()
+                .filter(|(i, _)| *i != skip_idx)
+                .map(|(_, b)| b)
+                .collect(),
+            None => ch.blocks.iter().collect(),
         };
         for b in blocks_to_render {
             r.render_block(b);
@@ -73,11 +75,32 @@ pub fn render(chapters: &[ChapterToRender<'_>]) -> RenderResult {
     RenderResult { body: r.buf, chapter_offsets: r.offsets }
 }
 
-fn first_heading_matches_title(blocks: &[Block], title: &str) -> bool {
-    let Some(first) = blocks.first() else { return false; };
-    let Block::Heading { level, text } = first else { return false; };
-    if *level > 2 { return false; }
-    inline_to_text(text).trim() == title.trim()
+/// Returns the index of a leading heading whose text matches `title`, if one
+/// exists among the first few blocks (skipping over auxiliary blocks like
+/// empty paragraphs, images, and anchors). Returns None if no match.
+fn find_first_matching_heading(blocks: &[Block], title: &str) -> Option<usize> {
+    // Look at up to the first 4 blocks. In real books, the duplicate chapter
+    // heading might be preceded by a stray image, empty paragraph, or anchor.
+    let limit = blocks.len().min(4);
+    for (i, b) in blocks[..limit].iter().enumerate() {
+        match b {
+            Block::Heading { level, text } if *level <= 2 => {
+                if inline_to_text(text).trim() == title.trim() {
+                    return Some(i);
+                }
+                // First real heading found and it doesn't match; stop looking.
+                return None;
+            }
+            // Auxiliary blocks: keep scanning past them.
+            Block::Paragraph(inl) if inl.is_empty() => continue,
+            Block::Image { .. } => continue,
+            Block::Anchor { .. } => continue,
+            // Anything else (paragraph with text, list, table, code, blockquote,
+            // hr, footnote def, h3+) — chapter content has begun. Stop.
+            _ => return None,
+        }
+    }
+    None
 }
 
 fn inline_to_text(i: &Inline) -> String {
@@ -575,6 +598,59 @@ mod tests {
         // Both headings appear: "## Cover" (auto) and "## Different Heading" (h1 shifted).
         assert!(body.contains("## Cover"), "got: {body}");
         assert!(body.contains("## Different Heading"), "got: {body}");
+    }
+
+    #[test]
+    fn skip_heading_preceded_by_empty_paragraph() {
+        let blocks = [
+            Block::Paragraph(Inline::empty()),  // auxiliary
+            Block::Heading { level: 1, text: Inline::Text("Cover".into()) },
+            Block::Paragraph(Inline::Text("body".into())),
+        ];
+        let chs = vec![ChapterToRender {
+            number: 1,
+            title: "Cover",
+            blocks: &blocks,
+            footnotes: &[],
+        }];
+        let body = render(&chs).body;
+        assert_eq!(body.matches("## Cover").count(), 1, "got: {body}");
+        assert!(body.contains("body"));
+    }
+
+    #[test]
+    fn skip_heading_preceded_by_image() {
+        let blocks = [
+            Block::Image { src: "x.jpg".into(), alt: "".into(), title: None },
+            Block::Heading { level: 1, text: Inline::Text("Intro".into()) },
+        ];
+        let chs = vec![ChapterToRender {
+            number: 1,
+            title: "Intro",
+            blocks: &blocks,
+            footnotes: &[],
+        }];
+        let body = render(&chs).body;
+        assert_eq!(body.matches("## Intro").count(), 1, "got: {body}");
+        // Image should still appear.
+        assert!(body.contains("![](x.jpg)"), "got: {body}");
+    }
+
+    #[test]
+    fn dont_skip_if_first_real_block_is_content() {
+        let blocks = [
+            Block::Paragraph(Inline::Text("hello".into())),
+            Block::Heading { level: 1, text: Inline::Text("Foo".into()) },
+        ];
+        let chs = vec![ChapterToRender {
+            number: 1,
+            title: "Foo",
+            blocks: &blocks,
+            footnotes: &[],
+        }];
+        let body = render(&chs).body;
+        // Heading is too late — chapter content already started. Both headings appear.
+        assert_eq!(body.matches("## Foo").count(), 2, "got: {body}");
     }
 
     #[test]
