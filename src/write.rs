@@ -27,8 +27,17 @@ pub fn convert(args: &Args) -> Result<()> {
 
     // 2. Extract each spine doc into Blocks; resolve title; collect footnotes.
     let mut chapters: Vec<Chapter> = Vec::with_capacity(book.spine.len());
-    for (i, doc) in book.spine.iter().enumerate() {
+    let mut chapter_n = 0;
+    for doc in book.spine.iter() {
         let mut blocks = crate::extract::parse(&doc.html);
+
+        // Skip "running header only" spine docs — these are empty pages that
+        // Calibre and similar tools leave behind, containing just the book
+        // title as a heading.
+        if crate::assemble::is_running_header_only(&blocks, &book.metadata.title) {
+            continue;
+        }
+
         let html_title = parse_html_title(&doc.html);
         let title = resolve_title(
             doc.toc_title.as_deref(),
@@ -36,9 +45,9 @@ pub fn convert(args: &Args) -> Result<()> {
             &blocks,
             &doc.manifest_path,
         );
-        let n = i + 1;
-        namespace_chapter(&mut blocks, n);
-        chapters.push(Chapter { number: n, title, source_path: doc.manifest_path.clone(), blocks });
+        chapter_n += 1;
+        namespace_chapter(&mut blocks, chapter_n);
+        chapters.push(Chapter { number: chapter_n, title, source_path: doc.manifest_path.clone(), blocks });
     }
     rewrite_internal_links(&mut chapters);
 

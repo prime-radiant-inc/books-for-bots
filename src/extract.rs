@@ -420,18 +420,20 @@ fn is_footnote_container(el: ElementRef) -> bool {
 /// Detect a footnote reference hidden in a plain `<a href="...#fn1">1</a>` with no
 /// `<sup>` wrapper or `epub:type="noteref"`.
 /// Returns the fragment id if the link looks like a footnote reference.
+///
+/// Cross-doc links (href has both a path and a fragment) with short marker text
+/// are treated as footnote refs regardless of fragment shape — Calibre uses
+/// `#filepos<digits>` which would otherwise fail the footnote-y prefix check.
+/// Intra-doc `#fragment-only` links keep the strict footnote-y fragment requirement
+/// so we don't mistake short-text TOC anchors for footnotes.
 fn looks_like_footnote_ref(href: &str, text_content: &str) -> Option<String> {
-    // Extract the fragment.
-    let frag = href.split_once('#').map(|(_, f)| f).unwrap_or_else(|| href.trim_start_matches('#'));
-    if frag.is_empty() || frag == href { return None; }
-    // Fragment must look footnote-y.
-    let frag_lower = frag.to_ascii_lowercase();
-    let is_fn_frag = frag_lower.starts_with("fn")
-        || frag_lower.starts_with("footnote")
-        || frag_lower.starts_with("note")
-        || frag_lower.starts_with("ftn")
-        || frag_lower.starts_with("ref");
-    if !is_fn_frag { return None; }
+    // Extract fragment and path.
+    let (path_part, frag) = match href.split_once('#') {
+        Some((p, f)) => (p, f),
+        None => return None,
+    };
+    if frag.is_empty() { return None; }
+
     // Text must be a tiny marker.
     let trimmed = text_content.trim();
     if trimmed.is_empty() || trimmed.chars().count() > 4 { return None; }
@@ -439,6 +441,22 @@ fn looks_like_footnote_ref(href: &str, text_content: &str) -> Option<String> {
         c.is_alphanumeric() || matches!(c, '*' | '†' | '‡' | '§' | '¶' | '⁂' | '^' | '[' | ']')
     });
     if !is_marker { return None; }
+
+    // Cross-doc link with short marker → trust it as a footnote ref regardless
+    // of fragment shape (Calibre uses #filepos<digits>, etc.).
+    if !path_part.is_empty() {
+        return Some(frag.to_string());
+    }
+
+    // Intra-doc (#fragment-only): require the fragment to look footnote-y to
+    // avoid mis-identifying short-text TOC anchors as footnotes.
+    let frag_lower = frag.to_ascii_lowercase();
+    let is_fn_frag = frag_lower.starts_with("fn")
+        || frag_lower.starts_with("footnote")
+        || frag_lower.starts_with("note")
+        || frag_lower.starts_with("ftn")
+        || frag_lower.starts_with("ref");
+    if !is_fn_frag { return None; }
     Some(frag.to_string())
 }
 
@@ -738,6 +756,24 @@ mod tests {
         let Block::Paragraph(Inline::Concat(parts)) = &b[0] else { panic!("got: {b:?}") };
         // Should be a Link, not a FootnoteRef.
         assert!(parts.iter().any(|i| matches!(i, Inline::Link { .. })), "got: {parts:?}");
+        assert!(!parts.iter().any(|i| matches!(i, Inline::FootnoteRef(_))), "got: {parts:?}");
+    }
+
+    #[test]
+    fn cross_doc_short_marker_with_filepos_fragment_is_noteref() {
+        // Calibre-style: <a href="other.html#filepos441606">1</a>
+        let html = r#"<html><body><p>see<a href="other.html#filepos441606">1</a>.</p></body></html>"#;
+        let b = parse(html);
+        let Block::Paragraph(Inline::Concat(parts)) = &b[0] else { panic!("got: {b:?}") };
+        assert!(parts.iter().any(|i| matches!(i, Inline::FootnoteRef(s) if s == "filepos441606")), "got: {parts:?}");
+    }
+
+    #[test]
+    fn intra_doc_short_marker_non_fn_fragment_stays_link() {
+        // Within-doc link to "section-1" with marker text "1" — NOT a footnote.
+        let html = r##"<html><body><p>see <a href="#section-1">1</a> for more.</p></body></html>"##;
+        let b = parse(html);
+        let Block::Paragraph(Inline::Concat(parts)) = &b[0] else { panic!("got: {b:?}") };
         assert!(!parts.iter().any(|i| matches!(i, Inline::FootnoteRef(_))), "got: {parts:?}");
     }
 }

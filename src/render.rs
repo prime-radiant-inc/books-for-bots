@@ -73,7 +73,7 @@ pub fn render(chapters: &[ChapterToRender<'_>]) -> RenderResult {
     RenderResult { body: r.buf, chapter_offsets: r.offsets }
 }
 
-fn normalize_ws(s: &str) -> String {
+pub(crate) fn normalize_ws(s: &str) -> String {
     s.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
@@ -83,7 +83,7 @@ fn normalize_for_match(s: &str) -> String {
     normalize_ws(&s.replace(['-', '\u{2013}', '\u{2014}'], " "))
 }
 
-fn heading_matches(h_norm: &str, target_norm: &str) -> bool {
+pub(crate) fn heading_matches(h_norm: &str, target_norm: &str) -> bool {
     if h_norm == target_norm { return true; }
     // Also try with dashes stripped so "Man-Month" matches "Man Month".
     let h_dash = normalize_for_match(h_norm);
@@ -136,7 +136,7 @@ fn find_auxiliary_heading_indices(
     to_drop
 }
 
-fn inline_to_text(i: &Inline) -> String {
+pub(crate) fn inline_to_text(i: &Inline) -> String {
     match i {
         Inline::Text(s) => s.clone(),
         Inline::Concat(xs) | Inline::Emphasis(xs) | Inline::Strong(xs) => {

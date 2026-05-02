@@ -53,6 +53,36 @@ fn inline_to_plain(i: &Inline) -> String {
     }
 }
 
+/// True if every meaningful block in `blocks` is a heading whose text matches
+/// (whitespace-normalized, fuzzy contains) the book title. Used to detect
+/// "running header" spine docs that some EPUB conversions leave as standalone
+/// chapter entries.
+pub fn is_running_header_only(blocks: &[Block], book_title: &str) -> bool {
+    if book_title.trim().is_empty() { return false; }
+    let book_norm = crate::render::normalize_ws(book_title);
+    let mut saw_matching_heading = false;
+    for b in blocks {
+        match b {
+            Block::Heading { level, text } if *level <= 2 => {
+                let h_norm = crate::render::normalize_ws(&crate::render::inline_to_text(text));
+                if crate::render::heading_matches(&h_norm, &book_norm) {
+                    saw_matching_heading = true;
+                } else {
+                    return false; // a non-matching heading = real chapter content
+                }
+            }
+            // Auxiliary blocks: don't disqualify.
+            Block::Paragraph(inl) if inl.is_empty() => continue,
+            Block::Image { .. } => continue,
+            Block::Anchor { .. } => continue,
+            Block::HorizontalRule => continue,
+            // Anything else = real content. Not a running-header doc.
+            _ => return false,
+        }
+    }
+    saw_matching_heading
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -102,6 +132,42 @@ mod tests {
     fn whitespace_only_is_skipped() {
         let t = resolve_title(Some("   "), Some(""), &[], "x.xhtml");
         assert_eq!(t, "Untitled (x.xhtml)");
+    }
+
+    #[test]
+    fn detects_running_header_only_doc() {
+        let blocks = vec![
+            Block::Heading { level: 1, text: Inline::Text("The Mythical Man-Month".into()) },
+        ];
+        assert!(is_running_header_only(&blocks, "The Mythical Man-Month"));
+    }
+
+    #[test]
+    fn detects_running_header_with_aux_blocks() {
+        let blocks = vec![
+            Block::Paragraph(Inline::empty()),
+            Block::Heading { level: 1, text: Inline::Text("The Mythical Man-Month".into()) },
+            Block::Image { src: "x.jpg".into(), alt: "".into(), title: None },
+        ];
+        assert!(is_running_header_only(&blocks, "The Mythical Man-Month"));
+    }
+
+    #[test]
+    fn real_chapter_with_book_title_in_running_header_not_dropped() {
+        // The book has title "Foo" but this chapter has a "Foo" heading PLUS body.
+        let blocks = vec![
+            Block::Heading { level: 1, text: Inline::Text("Foo".into()) },
+            Block::Paragraph(Inline::Text("real content".into())),
+        ];
+        assert!(!is_running_header_only(&blocks, "Foo"));
+    }
+
+    #[test]
+    fn empty_book_title_disables_check() {
+        let blocks = vec![
+            Block::Heading { level: 1, text: Inline::Text("Foo".into()) },
+        ];
+        assert!(!is_running_header_only(&blocks, ""));
     }
 }
 
