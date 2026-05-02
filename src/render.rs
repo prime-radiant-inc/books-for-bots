@@ -61,6 +61,12 @@ pub fn render(chapters: &[ChapterToRender<'_>]) -> RenderResult {
                 .into_iter().collect();
         for (i, b) in ch.blocks.iter().enumerate() {
             if drop_set.contains(&i) { continue; }
+            // Scrub running-header h1/h2 anywhere in the body.
+            if let Block::Heading { level, text } = b {
+                if *level <= 2 && is_running_header(text, ch.title, ch.book_title) {
+                    continue;
+                }
+            }
             r.render_block(b);
         }
         if !ch.footnotes.is_empty() {
@@ -74,7 +80,15 @@ pub fn render(chapters: &[ChapterToRender<'_>]) -> RenderResult {
 }
 
 pub(crate) fn normalize_ws(s: &str) -> String {
-    s.split_whitespace().collect::<Vec<_>>().join(" ")
+    // Treat hyphens and dashes as whitespace so "Man-Month" matches "Man Month".
+    // (Print typesetting often replaces a hyphen with a line-break-induced space
+    // or vice versa; we want robustness across both.)
+    s.chars()
+        .map(|c| if c == '-' || c == '\u{2013}' || c == '\u{2014}' { ' ' } else { c })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Normalize for comparison: whitespace-collapse then strip hyphens/en-dashes/em-dashes
@@ -134,6 +148,19 @@ fn find_auxiliary_heading_indices(
         }
     }
     to_drop
+}
+
+/// True if this heading is a running-header repeat — its text matches
+/// (whitespace+hyphen normalized, fuzzy contains, length >= 4) either the
+/// chapter title or the book title. Used to scrub repeated running-header
+/// occurrences from anywhere in the chapter body, not just the leading aux area.
+fn is_running_header(text: &Inline, chapter_title: &str, book_title: &str) -> bool {
+    let h_norm = normalize_ws(&inline_to_text(text));
+    if h_norm.is_empty() { return false; }
+    let chap_norm = normalize_ws(chapter_title);
+    let book_norm = normalize_ws(book_title);
+    heading_matches(&h_norm, &chap_norm)
+        || (!book_norm.is_empty() && heading_matches(&h_norm, &book_norm))
 }
 
 pub(crate) fn inline_to_text(i: &Inline) -> String {
@@ -675,7 +702,9 @@ mod tests {
     }
 
     #[test]
-    fn dont_skip_if_first_real_block_is_content() {
+    fn mid_chapter_heading_matching_title_is_scrubbed() {
+        // Running-header scrub applies everywhere, not just the leading aux area.
+        // A heading mid-chapter that matches the chapter title is a running header.
         let blocks = [
             Block::Paragraph(Inline::Text("hello".into())),
             Block::Heading { level: 1, text: Inline::Text("Foo".into()) },
@@ -688,8 +717,9 @@ mod tests {
             footnotes: &[],
         }];
         let body = render(&chs).body;
-        // Heading is too late — chapter content already started. Both headings appear.
-        assert_eq!(body.matches("## Foo").count(), 2, "got: {body}");
+        // The auto-emitted chapter heading appears once; the mid-chapter repeat is scrubbed.
+        assert_eq!(body.matches("## Foo").count(), 1, "got: {body}");
+        assert!(body.contains("hello"));
     }
 
     #[test]
@@ -799,5 +829,72 @@ mod tests {
         let body = render(&chs).body;
         // Heading "X" doesn't match "Foo Bar Baz" — kept.
         assert_eq!(body.matches("## X").count(), 1, "got: {body}");
+    }
+
+    #[test]
+    fn hyphen_normalization_matches_dash_variants() {
+        assert_eq!(normalize_ws("The Mythical Man-Month"), "The Mythical Man Month");
+        assert_eq!(normalize_ws("Foo \u{2013} Bar"), "Foo Bar");
+        assert_eq!(normalize_ws("Foo \u{2014} Bar"), "Foo Bar");
+    }
+
+    #[test]
+    fn book_title_with_hyphen_matches_running_header_no_hyphen() {
+        let blocks = [
+            Block::Heading { level: 1, text: Inline::Text("Chapter 1".into()) },
+            Block::Heading { level: 1, text: Inline::Text("The Mythical Man Month".into()) },
+            Block::Paragraph(Inline::Text("body".into())),
+        ];
+        let chs = vec![ChapterToRender {
+            number: 1,
+            title: "Chapter 1",
+            book_title: "The Mythical Man-Month",
+            blocks: &blocks,
+            footnotes: &[],
+        }];
+        let body = render(&chs).body;
+        assert_eq!(body.matches("## Chapter 1").count(), 1, "got: {body}");
+        assert!(!body.contains("## The Mythical Man Month"), "running header should drop; got: {body}");
+        assert!(body.contains("body"));
+    }
+
+    #[test]
+    fn mid_chapter_running_header_is_scrubbed() {
+        let blocks = [
+            Block::Heading { level: 1, text: Inline::Text("The Tar Pit".into()) },
+            Block::Paragraph(Inline::Text("Some prose.".into())),
+            Block::Heading { level: 1, text: Inline::Text("The Mythical Man Month".into()) },
+            Block::Paragraph(Inline::Text("More prose.".into())),
+        ];
+        let chs = vec![ChapterToRender {
+            number: 1,
+            title: "The Tar Pit",
+            book_title: "The Mythical Man-Month",
+            blocks: &blocks,
+            footnotes: &[],
+        }];
+        let body = render(&chs).body;
+        assert!(!body.contains("## The Mythical Man"), "got: {body}");
+        assert!(body.contains("Some prose."));
+        assert!(body.contains("More prose."));
+    }
+
+    #[test]
+    fn legitimate_h3_in_chapter_kept() {
+        // A subheading at level >= 3 should not be scrubbed even if its text matches.
+        let blocks = [
+            Block::Heading { level: 1, text: Inline::Text("Foo".into()) },
+            Block::Heading { level: 3, text: Inline::Text("Foo".into()) },
+            Block::Paragraph(Inline::Text("body".into())),
+        ];
+        let chs = vec![ChapterToRender {
+            number: 1,
+            title: "Foo",
+            book_title: "Foo",
+            blocks: &blocks,
+            footnotes: &[],
+        }];
+        let body = render(&chs).body;
+        assert!(body.contains("#### Foo"), "h3 (shifted to ####) should be preserved; got: {body}");
     }
 }
