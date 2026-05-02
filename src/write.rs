@@ -61,6 +61,7 @@ pub fn convert(args: &Args) -> Result<()> {
         .map(|(ch, (_t, body, fns))| ChapterToRender {
             number: ch.number,
             title: &ch.title,
+            book_title: &book.metadata.title,
             blocks: body,
             footnotes: fns,
         })

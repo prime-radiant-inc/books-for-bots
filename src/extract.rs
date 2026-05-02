@@ -125,14 +125,17 @@ fn inline_of_single(el: ElementRef) -> Inline {
         "br" => Inline::LineBreak,
         "a" => {
             let href = el.value().attr("href").unwrap_or("").to_string();
-            let is_noteref = el
+            let text_only = plain_text(el);
+            let is_explicit_noteref = el
                 .value()
                 .attr("epub:type")
                 .map(|t| t.contains("noteref"))
                 .unwrap_or(false)
                 || (href.starts_with('#') && parent_is_sup(el));
-            if is_noteref {
+            if is_explicit_noteref {
                 let id = href.trim_start_matches('#').to_string();
+                Inline::FootnoteRef(id)
+            } else if let Some(id) = looks_like_footnote_ref(&href, &text_only) {
                 Inline::FootnoteRef(id)
             } else if href.is_empty() {
                 inline_of(el, false)
@@ -320,14 +323,17 @@ fn inline_of(el: ElementRef, has_outer_prior: bool) -> Inline {
                         "br" => Inline::LineBreak,
                         "a" => {
                             let href = ce.value().attr("href").unwrap_or("").to_string();
-                            let is_noteref = ce
+                            let text_only = plain_text(ce);
+                            let is_explicit_noteref = ce
                                 .value()
                                 .attr("epub:type")
                                 .map(|t| t.contains("noteref"))
                                 .unwrap_or(false)
                                 || (href.starts_with('#') && parent_is_sup(ce));
-                            if is_noteref {
+                            if is_explicit_noteref {
                                 let id = href.trim_start_matches('#').to_string();
+                                Inline::FootnoteRef(id)
+                            } else if let Some(id) = looks_like_footnote_ref(&href, &text_only) {
                                 Inline::FootnoteRef(id)
                             } else if href.is_empty() {
                                 // Anchor-only <a id="..."> — return its content inline,
@@ -409,6 +415,31 @@ fn is_footnote_container(el: ElementRef) -> bool {
     let is_div_footnote = v.name() == "div"
         && v.attr("class").map(|c| c.split_whitespace().any(|t| t == "footnote")).unwrap_or(false);
     is_aside_footnote || is_div_footnote
+}
+
+/// Detect a footnote reference hidden in a plain `<a href="...#fn1">1</a>` with no
+/// `<sup>` wrapper or `epub:type="noteref"`.
+/// Returns the fragment id if the link looks like a footnote reference.
+fn looks_like_footnote_ref(href: &str, text_content: &str) -> Option<String> {
+    // Extract the fragment.
+    let frag = href.split_once('#').map(|(_, f)| f).unwrap_or_else(|| href.trim_start_matches('#'));
+    if frag.is_empty() || frag == href { return None; }
+    // Fragment must look footnote-y.
+    let frag_lower = frag.to_ascii_lowercase();
+    let is_fn_frag = frag_lower.starts_with("fn")
+        || frag_lower.starts_with("footnote")
+        || frag_lower.starts_with("note")
+        || frag_lower.starts_with("ftn")
+        || frag_lower.starts_with("ref");
+    if !is_fn_frag { return None; }
+    // Text must be a tiny marker.
+    let trimmed = text_content.trim();
+    if trimmed.is_empty() || trimmed.chars().count() > 4 { return None; }
+    let is_marker = trimmed.chars().all(|c| {
+        c.is_alphanumeric() || matches!(c, '*' | '†' | '‡' | '§' | '¶' | '⁂' | '^' | '[' | ']')
+    });
+    if !is_marker { return None; }
+    Some(frag.to_string())
 }
 
 fn collapse_ws(s: &str) -> String {
@@ -672,5 +703,41 @@ mod tests {
 <body><p>Body content here.</p></body></html>"#;
         let b = parse(html);
         assert_eq!(b, vec![Block::Paragraph(Inline::Text("Body content here.".into()))]);
+    }
+
+    #[test]
+    fn plain_a_with_fn_fragment_becomes_noteref() {
+        let html = r#"<html><body><p>see<a href="other.html#fn1">1</a> for more.</p></body></html>"#;
+        let b = parse(html);
+        let Block::Paragraph(Inline::Concat(parts)) = &b[0] else { panic!("got: {b:?}") };
+        assert!(parts.iter().any(|i| matches!(i, Inline::FootnoteRef(s) if s == "fn1")), "got: {parts:?}");
+    }
+
+    #[test]
+    fn plain_a_with_footnote_fragment_becomes_noteref() {
+        let html = r##"<html><body><p>x<a href="#footnote-3">3</a>.</p></body></html>"##;
+        let b = parse(html);
+        let Block::Paragraph(Inline::Concat(parts)) = &b[0] else { panic!("got: {b:?}") };
+        assert!(parts.iter().any(|i| matches!(i, Inline::FootnoteRef(s) if s == "footnote-3")), "got: {parts:?}");
+    }
+
+    #[test]
+    fn long_text_link_with_fn_fragment_stays_link() {
+        // Link text is too long to be a footnote marker.
+        let html = r##"<html><body><p>see <a href="#fn1">this entire footnote about cats</a>.</p></body></html>"##;
+        let b = parse(html);
+        let Block::Paragraph(Inline::Concat(parts)) = &b[0] else { panic!("got: {b:?}") };
+        assert!(!parts.iter().any(|i| matches!(i, Inline::FootnoteRef(_))), "got: {parts:?}");
+    }
+
+    #[test]
+    fn short_text_with_non_fn_fragment_stays_link() {
+        // Short text but fragment isn't footnote-like.
+        let html = r##"<html><body><p>see <a href="#section-1">1</a> for more.</p></body></html>"##;
+        let b = parse(html);
+        let Block::Paragraph(Inline::Concat(parts)) = &b[0] else { panic!("got: {b:?}") };
+        // Should be a Link, not a FootnoteRef.
+        assert!(parts.iter().any(|i| matches!(i, Inline::Link { .. })), "got: {parts:?}");
+        assert!(!parts.iter().any(|i| matches!(i, Inline::FootnoteRef(_))), "got: {parts:?}");
     }
 }

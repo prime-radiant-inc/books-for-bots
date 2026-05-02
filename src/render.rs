@@ -46,6 +46,7 @@ pub struct RenderResult {
 pub struct ChapterToRender<'a> {
     pub number: usize,
     pub title: &'a str,
+    pub book_title: &'a str,
     pub blocks: &'a [Block],
     /// Footnote definitions to emit at chapter end, in reference order.
     pub footnotes: &'a [Block],
@@ -55,14 +56,11 @@ pub fn render(chapters: &[ChapterToRender<'_>]) -> RenderResult {
     let mut r = Renderer::new();
     for ch in chapters {
         r.start_chapter(ch.number, ch.title);
-        let blocks_to_render: Vec<&Block> = match find_first_matching_heading(ch.blocks, ch.title) {
-            Some(skip_idx) => ch.blocks.iter().enumerate()
-                .filter(|(i, _)| *i != skip_idx)
-                .map(|(_, b)| b)
-                .collect(),
-            None => ch.blocks.iter().collect(),
-        };
-        for b in blocks_to_render {
+        let drop_set: std::collections::BTreeSet<usize> =
+            find_auxiliary_heading_indices(ch.blocks, ch.title, ch.book_title)
+                .into_iter().collect();
+        for (i, b) in ch.blocks.iter().enumerate() {
+            if drop_set.contains(&i) { continue; }
             r.render_block(b);
         }
         if !ch.footnotes.is_empty() {
@@ -75,32 +73,67 @@ pub fn render(chapters: &[ChapterToRender<'_>]) -> RenderResult {
     RenderResult { body: r.buf, chapter_offsets: r.offsets }
 }
 
-/// Returns the index of a leading heading whose text matches `title`, if one
-/// exists among the first few blocks (skipping over auxiliary blocks like
-/// empty paragraphs, images, and anchors). Returns None if no match.
-fn find_first_matching_heading(blocks: &[Block], title: &str) -> Option<usize> {
-    // Look at up to the first 4 blocks. In real books, the duplicate chapter
-    // heading might be preceded by a stray image, empty paragraph, or anchor.
-    let limit = blocks.len().min(4);
+fn normalize_ws(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Normalize for comparison: whitespace-collapse then strip hyphens/en-dashes/em-dashes
+/// so "Man-Month" and "Man Month" and "Man–Month" all compare equal.
+fn normalize_for_match(s: &str) -> String {
+    normalize_ws(&s.replace(['-', '\u{2013}', '\u{2014}'], " "))
+}
+
+fn heading_matches(h_norm: &str, target_norm: &str) -> bool {
+    if h_norm == target_norm { return true; }
+    // Also try with dashes stripped so "Man-Month" matches "Man Month".
+    let h_dash = normalize_for_match(h_norm);
+    let t_dash = normalize_for_match(target_norm);
+    if h_dash == t_dash { return true; }
+    if h_norm.len() < 4 || target_norm.len() < 4 { return false; }
+    if target_norm.contains(h_norm) || h_norm.contains(target_norm) { return true; }
+    // Fuzzy contains with dashes stripped.
+    if h_dash.len() >= 4 && t_dash.len() >= 4 {
+        if t_dash.contains(&h_dash) || h_dash.contains(&t_dash) { return true; }
+    }
+    false
+}
+
+/// Return indices of leading auxiliary heading blocks to drop.
+/// "Auxiliary" means: heading at level <= 2 in the first ~8 blocks whose
+/// text matches (whitespace-normalized) either the chapter title or the
+/// book title, with a fuzzy contains-match fallback. Stops scanning at
+/// the first content-bearing block.
+fn find_auxiliary_heading_indices(
+    blocks: &[Block],
+    chapter_title: &str,
+    book_title: &str,
+) -> Vec<usize> {
+    let mut to_drop = Vec::new();
+    let limit = blocks.len().min(8);
+    let chap_norm = normalize_ws(chapter_title);
+    let book_norm = normalize_ws(book_title);
     for (i, b) in blocks[..limit].iter().enumerate() {
         match b {
             Block::Heading { level, text } if *level <= 2 => {
-                if inline_to_text(text).trim() == title.trim() {
-                    return Some(i);
+                let h_norm = normalize_ws(&inline_to_text(text));
+                let matches_chap = heading_matches(&h_norm, &chap_norm);
+                let matches_book = !book_norm.is_empty() && heading_matches(&h_norm, &book_norm);
+                if matches_chap || matches_book {
+                    to_drop.push(i);
+                    continue;
                 }
-                // First real heading found and it doesn't match; stop looking.
-                return None;
+                // First non-matching heading — stop scanning.
+                return to_drop;
             }
-            // Auxiliary blocks: keep scanning past them.
+            // Auxiliary: keep scanning past these (they stay in the output unless dropped).
             Block::Paragraph(inl) if inl.is_empty() => continue,
             Block::Image { .. } => continue,
             Block::Anchor { .. } => continue,
-            // Anything else (paragraph with text, list, table, code, blockquote,
-            // hr, footnote def, h3+) — chapter content has begun. Stop.
-            _ => return None,
+            // Content block reached — stop.
+            _ => return to_drop,
         }
     }
-    None
+    to_drop
 }
 
 fn inline_to_text(i: &Inline) -> String {
@@ -387,6 +420,7 @@ mod tests {
         let chs = vec![ChapterToRender {
             number: 1,
             title: "T",
+            book_title: "",
             blocks: &blocks,
             footnotes: &[],
         }];
@@ -574,6 +608,7 @@ mod tests {
         let chs = vec![ChapterToRender {
             number: 1,
             title: "Cover",
+            book_title: "",
             blocks: &blocks,
             footnotes: &[],
         }];
@@ -591,6 +626,7 @@ mod tests {
         let chs = vec![ChapterToRender {
             number: 1,
             title: "Cover",
+            book_title: "",
             blocks: &blocks,
             footnotes: &[],
         }];
@@ -610,6 +646,7 @@ mod tests {
         let chs = vec![ChapterToRender {
             number: 1,
             title: "Cover",
+            book_title: "",
             blocks: &blocks,
             footnotes: &[],
         }];
@@ -627,6 +664,7 @@ mod tests {
         let chs = vec![ChapterToRender {
             number: 1,
             title: "Intro",
+            book_title: "",
             blocks: &blocks,
             footnotes: &[],
         }];
@@ -645,6 +683,7 @@ mod tests {
         let chs = vec![ChapterToRender {
             number: 1,
             title: "Foo",
+            book_title: "",
             blocks: &blocks,
             footnotes: &[],
         }];
@@ -679,5 +718,86 @@ mod tests {
         }]);
         assert!(s.contains("## Title subtitle\n"), "got: {s}");
         assert!(!s.contains("Title  subtitle"), "should collapse double space; got: {s}");
+    }
+
+    #[test]
+    fn skip_heading_with_whitespace_difference() {
+        // Source heading rendered as "1  High-Tech" (double space from <br/> as space).
+        let blocks = [
+            Block::Heading {
+                level: 1,
+                text: Inline::Concat(vec![
+                    Inline::Text("1".into()),
+                    Inline::LineBreak,
+                    Inline::Text(" High-Tech".into()),
+                ]),
+            },
+        ];
+        let chs = vec![ChapterToRender {
+            number: 1,
+            title: "1 High-Tech",
+            book_title: "",
+            blocks: &blocks,
+            footnotes: &[],
+        }];
+        let body = render(&chs).body;
+        assert_eq!(body.matches("## 1 High-Tech").count(), 1, "got: {body}");
+    }
+
+    #[test]
+    fn fuzzy_contains_match_skips_short_heading() {
+        // Title is "Chapter 1: The Tar Pit"; source heading is just "The Tar Pit".
+        let blocks = [
+            Block::Heading { level: 1, text: Inline::Text("The Tar Pit".into()) },
+        ];
+        let chs = vec![ChapterToRender {
+            number: 1,
+            title: "Chapter 1: The Tar Pit",
+            book_title: "",
+            blocks: &blocks,
+            footnotes: &[],
+        }];
+        let body = render(&chs).body;
+        assert!(body.contains("## Chapter 1: The Tar Pit"));
+        assert!(!body.contains("## The Tar Pit\n"), "should be deduped; got: {body}");
+    }
+
+    #[test]
+    fn drops_running_header_matching_book_title() {
+        let blocks = [
+            Block::Heading { level: 1, text: Inline::Text("Chapter 1".into()) },
+            Block::Heading { level: 1, text: Inline::Text("The Mythical Man-Month".into()) },
+            Block::Paragraph(Inline::Text("body".into())),
+        ];
+        let chs = vec![ChapterToRender {
+            number: 1,
+            title: "Chapter 1",
+            book_title: "The Mythical Man-Month",
+            blocks: &blocks,
+            footnotes: &[],
+        }];
+        let body = render(&chs).body;
+        assert_eq!(body.matches("## Chapter 1").count(), 1, "got: {body}");
+        assert!(!body.contains("## The Mythical Man-Month"), "running header should be dropped; got: {body}");
+        assert!(body.contains("body"));
+    }
+
+    #[test]
+    fn fuzzy_match_requires_minimum_length() {
+        // "X" containing "Foo" or vice versa shouldn't match.
+        let blocks = [
+            Block::Heading { level: 1, text: Inline::Text("X".into()) },
+            Block::Paragraph(Inline::Text("body".into())),
+        ];
+        let chs = vec![ChapterToRender {
+            number: 1,
+            title: "Foo Bar Baz",
+            book_title: "",
+            blocks: &blocks,
+            footnotes: &[],
+        }];
+        let body = render(&chs).body;
+        // Heading "X" doesn't match "Foo Bar Baz" — kept.
+        assert_eq!(body.matches("## X").count(), 1, "got: {body}");
     }
 }
