@@ -9,6 +9,10 @@ Cargo.lock.bak
 /output/
 /books/
 
+# Public-domain examples (Project Gutenberg, etc.) are allowed in examples/.
+!examples/
+!examples/**
+
 # Editor / OS noise
 .DS_Store
 .idea/
