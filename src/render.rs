@@ -83,9 +83,12 @@ pub(crate) fn normalize_ws(s: &str) -> String {
     // Treat hyphens and dashes as whitespace so "Man-Month" matches "Man Month".
     // (Print typesetting often replaces a hyphen with a line-break-induced space
     // or vice versa; we want robustness across both.)
+    // Also lowercase so "POSITIONING AS CONTEXT" matches "Positioning as Context"
+    // — print books often use ALL CAPS for chapter heading display.
     s.chars()
         .map(|c| if c == '-' || c == '\u{2013}' || c == '\u{2014}' { ' ' } else { c })
         .collect::<String>()
+        .to_lowercase()
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
@@ -833,9 +836,11 @@ mod tests {
 
     #[test]
     fn hyphen_normalization_matches_dash_variants() {
-        assert_eq!(normalize_ws("The Mythical Man-Month"), "The Mythical Man Month");
-        assert_eq!(normalize_ws("Foo \u{2013} Bar"), "Foo Bar");
-        assert_eq!(normalize_ws("Foo \u{2014} Bar"), "Foo Bar");
+        // Note: normalize_ws also lowercases so "Positioning" == "POSITIONING".
+        assert_eq!(normalize_ws("The Mythical Man-Month"), "the mythical man month");
+        assert_eq!(normalize_ws("Foo \u{2013} Bar"), "foo bar");
+        assert_eq!(normalize_ws("Foo \u{2014} Bar"), "foo bar");
+        assert_eq!(normalize_ws("POSITIONING AS CONTEXT"), "positioning as context");
     }
 
     #[test]
