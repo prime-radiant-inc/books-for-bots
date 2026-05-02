@@ -44,7 +44,6 @@ pub fn convert(args: &Args) -> Result<()> {
             html_title.as_deref(),
             &blocks,
             &doc.manifest_path,
-            &book.metadata.title,
         );
         chapter_n += 1;
         namespace_chapter(&mut blocks, chapter_n);

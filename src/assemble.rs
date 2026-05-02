@@ -2,9 +2,7 @@ use crate::block::{Block, Inline};
 
 /// Resolve the title for a single spine document, in priority order:
 /// 1. TOC label
-/// 2. First H1 or H2 in the parsed blocks that does NOT match the book title
-///    (skipping book-title running headers that Calibre places at the top of
-///    every print page)
+/// 2. First H1 or H2 in the parsed blocks
 /// 3. The HTML <title> element (passed as `html_title`, may be empty)
 /// 4. `Untitled (<filename>)`
 ///
@@ -16,7 +14,6 @@ pub fn resolve_title(
     html_title: Option<&str>,
     blocks: &[Block],
     spine_filename: &str,
-    book_title: &str,
 ) -> String {
     if let Some(t) = toc_label {
         let trimmed = t.trim();
@@ -24,31 +21,22 @@ pub fn resolve_title(
             return trimmed.to_string();
         }
     }
-    let book_norm = crate::render::normalize_ws(book_title);
+    // Per real-world tuning: prefer the body's first H1/H2 over the HTML <title>
+    // since EPUBs typically put the book title (not chapter title) in <title>.
     for b in blocks {
         if let Block::Heading { level, text } = b {
             if *level <= 2 {
                 let s = inline_to_plain(text);
-                if s.trim().is_empty() { continue; }
-                // Skip headings that are just the book title — those are
-                // running headers from print-layout pagination, not chapter titles.
-                let h_norm = crate::render::normalize_ws(&s);
-                if !book_norm.is_empty() && crate::render::heading_matches(&h_norm, &book_norm) {
-                    continue;
+                if !s.trim().is_empty() {
+                    return s;
                 }
-                return s;
             }
         }
     }
     if let Some(t) = html_title {
         let trimmed = t.trim();
         if !trimmed.is_empty() {
-            // HTML <title> often equals the book title on every spine doc — skip it
-            // for the same reason we skip book-title h1/h2 headings.
-            let t_norm = crate::render::normalize_ws(trimmed);
-            if book_norm.is_empty() || !crate::render::heading_matches(&t_norm, &book_norm) {
-                return trimmed.to_string();
-            }
+            return trimmed.to_string();
         }
     }
     format!("Untitled ({spine_filename})")
@@ -104,14 +92,14 @@ mod tests {
 
     #[test]
     fn toc_label_wins() {
-        let t = resolve_title(Some("Intro"), Some("Page"), &[], "x.xhtml", "");
+        let t = resolve_title(Some("Intro"), Some("Page"), &[], "x.xhtml");
         assert_eq!(t, "Intro");
     }
 
     #[test]
     fn html_title_when_no_h1_h2() {
         // Falls through to HTML title only if there's no body heading.
-        let t = resolve_title(None, Some("Page Title"), &[], "x.xhtml", "");
+        let t = resolve_title(None, Some("Page Title"), &[], "x.xhtml");
         assert_eq!(t, "Page Title");
     }
 
@@ -121,7 +109,7 @@ mod tests {
             Block::Paragraph(Inline::Text("preface".into())),
             Block::Heading { level: 2, text: Inline::Text("Real Title".into()) },
         ];
-        let t = resolve_title(None, None, &blocks, "x.xhtml", "");
+        let t = resolve_title(None, None, &blocks, "x.xhtml");
         assert_eq!(t, "Real Title");
     }
 
@@ -132,54 +120,53 @@ mod tests {
         let blocks = vec![
             Block::Heading { level: 1, text: Inline::Text("Real Chapter Title".into()) },
         ];
-        let t = resolve_title(None, Some("Book Title"), &blocks, "ch1.xhtml", "Book Title");
+        let t = resolve_title(None, Some("Book Title"), &blocks, "ch1.xhtml");
         assert_eq!(t, "Real Chapter Title");
     }
 
     #[test]
     fn fallback_uses_filename() {
-        let t = resolve_title(None, None, &[], "ch07.xhtml", "");
+        let t = resolve_title(None, None, &[], "ch07.xhtml");
         assert_eq!(t, "Untitled (ch07.xhtml)");
     }
 
     #[test]
     fn whitespace_only_is_skipped() {
-        let t = resolve_title(Some("   "), Some(""), &[], "x.xhtml", "");
+        let t = resolve_title(Some("   "), Some(""), &[], "x.xhtml");
         assert_eq!(t, "Untitled (x.xhtml)");
     }
 
     #[test]
-    fn book_title_heading_is_skipped_in_resolve_title() {
-        // A spine doc whose first h1/h2 is the book title should fall through to
-        // the html_title (or next h1/h2), not use the running-header as chapter title.
+    fn book_title_heading_is_used_as_title() {
+        // After the revert, book-title headings are no longer filtered.
+        // They will be used as the chapter title.
         let blocks = vec![
             Block::Heading { level: 1, text: Inline::Text("The Mythical Man Month".into()) },
             Block::Heading { level: 2, text: Inline::Text("The Tar Pit".into()) },
         ];
-        let t = resolve_title(None, Some("html title"), &blocks, "ch.xhtml", "The Mythical Man-Month");
-        assert_eq!(t, "The Tar Pit");
+        let t = resolve_title(None, Some("html title"), &blocks, "ch.xhtml");
+        assert_eq!(t, "The Mythical Man Month");
     }
 
     #[test]
-    fn book_title_heading_skipped_falls_through_to_html_title() {
-        // When the only h1/h2 is the book title, fall through to html_title.
+    fn single_h1_h2_priority_over_html_title() {
+        // Even if it matches the book title conceptually, we use the first H1/H2.
         let blocks = vec![
             Block::Heading { level: 1, text: Inline::Text("The Mythical Man Month".into()) },
             Block::Paragraph(Inline::Text("body content".into())),
         ];
-        let t = resolve_title(None, Some("Some Html Title"), &blocks, "ch.xhtml", "The Mythical Man-Month");
-        assert_eq!(t, "Some Html Title");
+        let t = resolve_title(None, Some("Some Html Title"), &blocks, "ch.xhtml");
+        assert_eq!(t, "The Mythical Man Month");
     }
 
     #[test]
-    fn html_title_matching_book_title_falls_through_to_untitled() {
-        // Calibre puts the book title in html_title of every spine doc. When both
-        // h1/h2 and html_title match the book title, fall through to Untitled.
+    fn no_h1_h2_falls_through_to_html_title() {
+        // When there's no H1/H2, use the html_title.
         let blocks = vec![
             Block::Paragraph(Inline::Text("some body".into())),
         ];
-        let t = resolve_title(None, Some("The Mythical Man Month"), &blocks, "split_012.html", "The Mythical Man-Month");
-        assert_eq!(t, "Untitled (split_012.html)");
+        let t = resolve_title(None, Some("The Mythical Man Month"), &blocks, "split_012.html");
+        assert_eq!(t, "The Mythical Man Month");
     }
 
     #[test]
