@@ -94,11 +94,9 @@ pub fn open(path: &Path) -> Result<Book> {
 
     // --- Cover image ---
     // get_cover_id() gives us the resource *id*; we need the manifest path.
-    let cover_image = doc.get_cover_id().and_then(|id| {
-        doc.resources
-            .get(&id)
-            .map(|r| r.path.to_string_lossy().into_owned())
-    });
+    let cover_image = doc
+        .get_cover_id()
+        .and_then(|id| doc.resources.get(&id).map(|r| epub_path_str(&r.path)));
 
     // --- Build TOC lookup: canonical path string → label ---
     // NavPoint.content is an absolute PathBuf (root_base-prefixed).
@@ -109,10 +107,10 @@ pub fn open(path: &Path) -> Result<Book> {
         .toc
         .iter()
         .map(|nav| {
-            let raw = nav.content.to_string_lossy();
+            let raw = epub_path_str(&nav.content);
             let key = match raw.split_once('#') {
                 Some((path, _frag)) => path.to_string(),
-                None => raw.into_owned(),
+                None => raw,
             };
             (key, nav.label.clone())
         })
@@ -127,7 +125,7 @@ pub fn open(path: &Path) -> Result<Book> {
 
         let manifest_path = doc
             .get_current_path()
-            .map(|p| p.to_string_lossy().into_owned())
+            .map(|p| epub_path_str(&p))
             .ok_or_else(|| crate::Error::EpubStructure(format!("spine item {i} has no path")))?;
 
         let html = doc.get_current_str().map(|(s, _mime)| s).ok_or_else(|| {
@@ -155,7 +153,7 @@ pub fn open(path: &Path) -> Result<Book> {
 
     let mut images = BTreeMap::new();
     for path in &image_paths {
-        let key = path.to_string_lossy().into_owned();
+        let key = epub_path_str(path);
         if let Some(bytes) = doc.get_resource_by_path(path) {
             images.insert(key, bytes);
         }
@@ -169,6 +167,13 @@ pub fn open(path: &Path) -> Result<Book> {
     })
 }
 
+/// EPUB-internal paths are always '/'-separated, but the epub crate hands
+/// them back as `PathBuf`s, which render with '\\' on Windows. Normalize at
+/// this boundary so TOC/spine/image map keys stay comparable everywhere.
+fn epub_path_str(p: &Path) -> String {
+    p.to_string_lossy().replace('\\', "/")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -178,5 +183,17 @@ mod tests {
     fn missing_file_is_invalid_epub() {
         let r = open(Path::new("/nonexistent/book.epub"));
         assert!(matches!(r, Err(crate::Error::InvalidEpub(_))));
+    }
+
+    #[test]
+    fn epub_path_str_normalizes_windows_separators() {
+        assert_eq!(
+            epub_path_str(Path::new("OEBPS\\text\\ch1.xhtml")),
+            "OEBPS/text/ch1.xhtml"
+        );
+        assert_eq!(
+            epub_path_str(Path::new("OEBPS/ch1.xhtml")),
+            "OEBPS/ch1.xhtml"
+        );
     }
 }
