@@ -4,6 +4,7 @@ use std::path::PathBuf;
 #[derive(Parser, Debug)]
 #[command(
     name = "books-for-bots",
+    version,
     about = "Convert an EPUB to YAML-headed markdown"
 )]
 pub struct Args {
@@ -29,6 +30,13 @@ mod tests {
         assert_eq!(a.input.to_str().unwrap(), "book.epub");
         assert_eq!(a.output_dir.to_str().unwrap(), "output");
         assert!(!a.force);
+    }
+
+    #[test]
+    fn version_flag_prints_crate_version() {
+        let err = Args::try_parse_from(["books-for-bots", "--version"]).unwrap_err();
+        assert_eq!(err.kind(), clap::error::ErrorKind::DisplayVersion);
+        assert!(err.to_string().contains(env!("CARGO_PKG_VERSION")));
     }
 
     #[test]
