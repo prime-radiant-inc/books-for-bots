@@ -1,6 +1,6 @@
 [package]
 name = "books-for-bots"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "Convert EPUB to YAML-headed markdown with chapter offsets, for token-efficient agent reading"
 license = "MIT"
