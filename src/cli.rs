@@ -2,7 +2,10 @@ use clap::Parser;
 use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
-#[command(name = "books-for-bots", about = "Convert an EPUB to YAML-headed markdown")]
+#[command(
+    name = "books-for-bots",
+    about = "Convert an EPUB to YAML-headed markdown"
+)]
 pub struct Args {
     /// Path to the input .epub file.
     pub input: PathBuf,
@@ -30,9 +33,14 @@ mod tests {
 
     #[test]
     fn overrides() {
-        let a = Args::try_parse_from(
-            ["books-for-bots", "book.epub", "--output-dir", "out", "--force"]
-        ).unwrap();
+        let a = Args::try_parse_from([
+            "books-for-bots",
+            "book.epub",
+            "--output-dir",
+            "out",
+            "--force",
+        ])
+        .unwrap();
         assert_eq!(a.output_dir.to_str().unwrap(), "out");
         assert!(a.force);
     }

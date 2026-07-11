@@ -8,7 +8,10 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<str>,
 {
-    let mut sorted: Vec<String> = manifest_paths.into_iter().map(|s| s.as_ref().to_string()).collect();
+    let mut sorted: Vec<String> = manifest_paths
+        .into_iter()
+        .map(|s| s.as_ref().to_string())
+        .collect();
     sorted.sort();
 
     let mut counts: BTreeMap<String, usize> = BTreeMap::new();
@@ -57,9 +60,7 @@ mod tests {
 
     #[test]
     fn three_way_collision_in_sorted_order() {
-        let m = resolve_basenames([
-            "z/foo.png", "a/foo.png", "m/foo.png",
-        ]);
+        let m = resolve_basenames(["z/foo.png", "a/foo.png", "m/foo.png"]);
         assert_eq!(m.get("a/foo.png").unwrap(), "foo.png");
         assert_eq!(m.get("m/foo.png").unwrap(), "foo-2.png");
         assert_eq!(m.get("z/foo.png").unwrap(), "foo-3.png");

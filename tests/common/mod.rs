@@ -13,11 +13,7 @@ pub struct ChapterSpec {
     pub html: &'static str,
 }
 
-pub fn build_minimal_book(
-    title: &str,
-    author: &str,
-    chapters: &[ChapterSpec],
-) -> Fixture {
+pub fn build_minimal_book(title: &str, author: &str, chapters: &[ChapterSpec]) -> Fixture {
     let mut buf = Cursor::new(Vec::new());
     let mut builder = EpubBuilder::new(ZipLibrary::new().expect("zip lib")).expect("builder");
     builder
@@ -42,5 +38,7 @@ pub fn build_minimal_book(
             .expect("add content");
     }
     builder.generate(&mut buf).expect("generate");
-    Fixture { bytes: buf.into_inner() }
+    Fixture {
+        bytes: buf.into_inner(),
+    }
 }

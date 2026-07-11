@@ -48,9 +48,8 @@ pub struct SpineDoc {
 /// parsed as a valid EPUB, or [`crate::Error::EpubStructure`] if required
 /// structural elements are missing.
 pub fn open(path: &Path) -> Result<Book> {
-    let mut doc = EpubDoc::new(path).map_err(|e| {
-        crate::Error::InvalidEpub(format!("{}: {e}", path.display()))
-    })?;
+    let mut doc = EpubDoc::new(path)
+        .map_err(|e| crate::Error::InvalidEpub(format!("{}: {e}", path.display())))?;
 
     let source_file = path.display().to_string();
 
@@ -129,18 +128,13 @@ pub fn open(path: &Path) -> Result<Book> {
         let manifest_path = doc
             .get_current_path()
             .map(|p| p.to_string_lossy().into_owned())
-            .ok_or_else(|| {
-                crate::Error::EpubStructure(format!("spine item {i} has no path"))
-            })?;
+            .ok_or_else(|| crate::Error::EpubStructure(format!("spine item {i} has no path")))?;
 
-        let html = doc
-            .get_current_str()
-            .map(|(s, _mime)| s)
-            .ok_or_else(|| {
-                crate::Error::EpubStructure(format!(
-                    "spine item {i} ({manifest_path}) could not be read"
-                ))
-            })?;
+        let html = doc.get_current_str().map(|(s, _mime)| s).ok_or_else(|| {
+            crate::Error::EpubStructure(format!(
+                "spine item {i} ({manifest_path}) could not be read"
+            ))
+        })?;
 
         let toc_title = toc_map.get(&manifest_path).cloned();
 

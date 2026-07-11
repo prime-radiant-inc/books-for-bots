@@ -3,19 +3,40 @@
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Block {
-    Heading { level: u8, text: Inline },
+    Heading {
+        level: u8,
+        text: Inline,
+    },
     Paragraph(Inline),
     BlockQuote(Vec<Block>),
-    List { ordered: bool, items: Vec<Vec<Block>> },
-    Table { header: Vec<Inline>, rows: Vec<Vec<Inline>> },
-    CodeBlock { lang: Option<String>, code: String },
-    Image { src: String, alt: String, title: Option<String> },
+    List {
+        ordered: bool,
+        items: Vec<Vec<Block>>,
+    },
+    Table {
+        header: Vec<Inline>,
+        rows: Vec<Vec<Inline>>,
+    },
+    CodeBlock {
+        lang: Option<String>,
+        code: String,
+    },
+    Image {
+        src: String,
+        alt: String,
+        title: Option<String>,
+    },
     HorizontalRule,
     /// Hoisted footnote definition. Rendered at end of chapter, not inline.
-    FootnoteDef { id: String, content: Vec<Block> },
+    FootnoteDef {
+        id: String,
+        content: Vec<Block>,
+    },
     /// Anchor tag injected by the assembler for non-heading IDs.
     /// Rendered as `<a id="..."></a>` on its own line.
-    Anchor { id: String },
+    Anchor {
+        id: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -24,8 +45,15 @@ pub enum Inline {
     Emphasis(Vec<Inline>),
     Strong(Vec<Inline>),
     Code(String),
-    Link { href: String, children: Vec<Inline> },
-    Image { src: String, alt: String, title: Option<String> },
+    Link {
+        href: String,
+        children: Vec<Inline>,
+    },
+    Image {
+        src: String,
+        alt: String,
+        title: Option<String>,
+    },
     FootnoteRef(String),
     LineBreak,
     Concat(Vec<Inline>),

@@ -21,9 +21,15 @@ pub fn convert(args: &Args) -> Result<()> {
         if !args.force {
             return Err(Error::OutputExists(book_dir));
         }
-        fs::remove_dir_all(&book_dir).map_err(|source| Error::Io { source, path: book_dir.clone() })?;
+        fs::remove_dir_all(&book_dir).map_err(|source| Error::Io {
+            source,
+            path: book_dir.clone(),
+        })?;
     }
-    fs::create_dir_all(&book_dir).map_err(|source| Error::Io { source, path: book_dir.clone() })?;
+    fs::create_dir_all(&book_dir).map_err(|source| Error::Io {
+        source,
+        path: book_dir.clone(),
+    })?;
 
     // 2. Extract each spine doc into Blocks; resolve title; collect footnotes.
     let mut chapters: Vec<Chapter> = Vec::with_capacity(book.spine.len());
@@ -47,7 +53,12 @@ pub fn convert(args: &Args) -> Result<()> {
         );
         chapter_n += 1;
         namespace_chapter(&mut blocks, chapter_n);
-        chapters.push(Chapter { number: chapter_n, title, source_path: doc.manifest_path.clone(), blocks });
+        chapters.push(Chapter {
+            number: chapter_n,
+            title,
+            source_path: doc.manifest_path.clone(),
+            blocks,
+        });
     }
     rewrite_internal_links(&mut chapters);
 
@@ -81,7 +92,10 @@ pub fn convert(args: &Args) -> Result<()> {
     let preliminary: Vec<FrontmatterChapter> = chapters
         .iter()
         .zip(body_result.chapter_offsets.iter())
-        .map(|(ch, off)| FrontmatterChapter { title: &ch.title, offset: off.clone() })
+        .map(|(ch, off)| FrontmatterChapter {
+            title: &ch.title,
+            offset: off.clone(),
+        })
         .collect();
     let preliminary_fm = frontmatter::render(&book.metadata, &preliminary)?;
     let fm_bytes = preliminary_fm.len() as u64;
@@ -100,28 +114,43 @@ pub fn convert(args: &Args) -> Result<()> {
         })
         .collect();
     let final_fm = frontmatter::render(&book.metadata, &final_offsets)?;
-    debug_assert_eq!(final_fm.len(), preliminary_fm.len(), "padded frontmatter changed size");
+    debug_assert_eq!(
+        final_fm.len(),
+        preliminary_fm.len(),
+        "padded frontmatter changed size"
+    );
 
     // 8. Write <slug>.md.
     let book_md = format!("{final_fm}{}", body_result.body);
     let book_md_path = book_dir.join(format!("{slug}.md"));
-    fs::write(&book_md_path, book_md).map_err(|source| Error::Io { source, path: book_md_path.clone() })?;
+    fs::write(&book_md_path, book_md).map_err(|source| Error::Io {
+        source,
+        path: book_md_path.clone(),
+    })?;
 
     // 9. Copy images (skip cover).
     let images_dir = book_dir.join("images");
     let mut wrote_image_dir = false;
     for (manifest_path, bytes) in &book.images {
-        if Some(manifest_path) == book.cover_image.as_ref() { continue; }
+        if Some(manifest_path) == book.cover_image.as_ref() {
+            continue;
+        }
         let basename = match basenames.get(manifest_path) {
             Some(b) => b,
             None => continue,
         };
         if !wrote_image_dir {
-            fs::create_dir_all(&images_dir).map_err(|source| Error::Io { source, path: images_dir.clone() })?;
+            fs::create_dir_all(&images_dir).map_err(|source| Error::Io {
+                source,
+                path: images_dir.clone(),
+            })?;
             wrote_image_dir = true;
         }
         let out = images_dir.join(basename);
-        fs::write(&out, bytes).map_err(|source| Error::Io { source, path: out.clone() })?;
+        fs::write(&out, bytes).map_err(|source| Error::Io {
+            source,
+            path: out.clone(),
+        })?;
     }
 
     Ok(())
@@ -130,7 +159,9 @@ pub fn convert(args: &Args) -> Result<()> {
 fn parse_html_title(html: &str) -> Option<String> {
     let re = scraper::Selector::parse("title").unwrap();
     let doc = scraper::Html::parse_document(html);
-    doc.select(&re).next().map(|el| el.text().collect::<String>())
+    doc.select(&re)
+        .next()
+        .map(|el| el.text().collect::<String>())
 }
 
 fn rewrite_image_srcs(
@@ -191,13 +222,33 @@ fn walk_block_images(
         Block::Heading { text, .. } | Block::Paragraph(text) => {
             walk_inline_images(text, owning_dir, book, basenames)?
         }
-        Block::BlockQuote(c) => for x in c { walk_block_images(x, owning_dir, book, basenames)?; },
-        Block::List { items, .. } => for it in items { for x in it { walk_block_images(x, owning_dir, book, basenames)?; } },
-        Block::Table { header, rows } => {
-            for c in header { walk_inline_images(c, owning_dir, book, basenames)?; }
-            for r in rows { for c in r { walk_inline_images(c, owning_dir, book, basenames)?; } }
+        Block::BlockQuote(c) => {
+            for x in c {
+                walk_block_images(x, owning_dir, book, basenames)?;
+            }
         }
-        Block::FootnoteDef { content, .. } => for x in content { walk_block_images(x, owning_dir, book, basenames)?; },
+        Block::List { items, .. } => {
+            for it in items {
+                for x in it {
+                    walk_block_images(x, owning_dir, book, basenames)?;
+                }
+            }
+        }
+        Block::Table { header, rows } => {
+            for c in header {
+                walk_inline_images(c, owning_dir, book, basenames)?;
+            }
+            for r in rows {
+                for c in r {
+                    walk_inline_images(c, owning_dir, book, basenames)?;
+                }
+            }
+        }
+        Block::FootnoteDef { content, .. } => {
+            for x in content {
+                walk_block_images(x, owning_dir, book, basenames)?;
+            }
+        }
         _ => {}
     }
     Ok(())
@@ -212,8 +263,16 @@ fn walk_inline_images(
     use crate::block::Inline;
     match i {
         Inline::Image { src, .. } => *src = resolve_one_src(src, owning_dir, book, basenames)?,
-        Inline::Concat(xs) | Inline::Emphasis(xs) | Inline::Strong(xs) => for x in xs { walk_inline_images(x, owning_dir, book, basenames)?; },
-        Inline::Link { children, .. } => for c in children { walk_inline_images(c, owning_dir, book, basenames)?; },
+        Inline::Concat(xs) | Inline::Emphasis(xs) | Inline::Strong(xs) => {
+            for x in xs {
+                walk_inline_images(x, owning_dir, book, basenames)?;
+            }
+        }
+        Inline::Link { children, .. } => {
+            for c in children {
+                walk_inline_images(c, owning_dir, book, basenames)?;
+            }
+        }
         _ => {}
     }
     Ok(())
@@ -236,7 +295,9 @@ fn normalize(p: &str) -> String {
     for seg in p.split('/') {
         match seg {
             "" | "." => {}
-            ".." => { parts.pop(); }
+            ".." => {
+                parts.pop();
+            }
             other => parts.push(other),
         }
     }

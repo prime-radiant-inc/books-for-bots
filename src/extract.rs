@@ -1,5 +1,5 @@
 use crate::block::{Block, Inline};
-use scraper::{Html, Node, ElementRef};
+use scraper::{ElementRef, Html, Node};
 
 pub fn parse(html: &str) -> Vec<Block> {
     let cleaned = strip_head(html);
@@ -43,8 +43,21 @@ fn extract_blocks(parent: ElementRef) -> Vec<Block> {
 }
 
 fn is_block_tag(name: &str) -> bool {
-    matches!(name, "p" | "ul" | "ol" | "blockquote" | "table" | "pre" |
-                  "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "hr")
+    matches!(
+        name,
+        "p" | "ul"
+            | "ol"
+            | "blockquote"
+            | "table"
+            | "pre"
+            | "h1"
+            | "h2"
+            | "h3"
+            | "h4"
+            | "h5"
+            | "h6"
+            | "hr"
+    )
 }
 
 fn extract_li(li: ElementRef) -> Vec<Block> {
@@ -66,7 +79,11 @@ fn extract_li(li: ElementRef) -> Vec<Block> {
     let mut inline_buf: Vec<Inline> = Vec::new();
     fn flush(buf: &mut Vec<Inline>, out: &mut Vec<Block>) {
         if !buf.is_empty() {
-            let inl = if buf.len() == 1 { buf.remove(0) } else { Inline::Concat(std::mem::take(buf)) };
+            let inl = if buf.len() == 1 {
+                buf.remove(0)
+            } else {
+                Inline::Concat(std::mem::take(buf))
+            };
             if !inl.is_empty() {
                 out.push(Block::Paragraph(inl));
             }
@@ -76,8 +93,10 @@ fn extract_li(li: ElementRef) -> Vec<Block> {
     for child in li.children() {
         match child.value() {
             Node::Text(t) => {
-                let s = collapse_ws(&t);
-                if !s.is_empty() { inline_buf.push(Inline::Text(s)); }
+                let s = collapse_ws(t);
+                if !s.is_empty() {
+                    inline_buf.push(Inline::Text(s));
+                }
             }
             Node::Element(_) => {
                 if let Some(ce) = ElementRef::wrap(child) {
@@ -144,7 +163,10 @@ fn inline_of_single(el: ElementRef) -> Inline {
                     Inline::Concat(v) => v,
                     other => vec![other],
                 };
-                Inline::Link { href, children: kids }
+                Inline::Link {
+                    href,
+                    children: kids,
+                }
             }
         }
         "img" => Inline::Image {
@@ -168,7 +190,10 @@ fn extract_into(el: ElementRef, out: &mut Vec<Block>) {
         }
         "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => {
             let level: u8 = name.as_bytes()[1] - b'0';
-            out.push(Block::Heading { level, text: inline_of(el, false) });
+            out.push(Block::Heading {
+                level,
+                text: inline_of(el, false),
+            });
         }
         "ul" | "ol" => {
             let ordered = name == "ol";
@@ -203,7 +228,10 @@ fn extract_into(el: ElementRef, out: &mut Vec<Block>) {
                     .map(|el| inline_of(el, false))
                     .collect();
                 let is_header_row = !header_set
-                    && tr.children().filter_map(ElementRef::wrap).any(|c| c.value().name() == "th");
+                    && tr
+                        .children()
+                        .filter_map(ElementRef::wrap)
+                        .any(|c| c.value().name() == "th");
                 if is_header_row {
                     header = cells;
                     header_set = true;
@@ -266,10 +294,8 @@ fn dedupe_consecutive_breaks(i: Inline) -> Inline {
             let mut out: Vec<Inline> = Vec::with_capacity(xs.len());
             for x in xs {
                 let x = dedupe_consecutive_breaks(x);
-                if matches!(x, Inline::LineBreak) {
-                    if matches!(out.last(), Some(Inline::LineBreak)) {
-                        continue;
-                    }
+                if matches!(x, Inline::LineBreak) && matches!(out.last(), Some(Inline::LineBreak)) {
+                    continue;
                 }
                 out.push(x);
             }
@@ -279,11 +305,18 @@ fn dedupe_consecutive_breaks(i: Inline) -> Inline {
                 _ => Inline::Concat(out),
             }
         }
-        Inline::Emphasis(xs) => Inline::Emphasis(xs.into_iter().map(dedupe_consecutive_breaks).collect()),
-        Inline::Strong(xs) => Inline::Strong(xs.into_iter().map(dedupe_consecutive_breaks).collect()),
+        Inline::Emphasis(xs) => {
+            Inline::Emphasis(xs.into_iter().map(dedupe_consecutive_breaks).collect())
+        }
+        Inline::Strong(xs) => {
+            Inline::Strong(xs.into_iter().map(dedupe_consecutive_breaks).collect())
+        }
         Inline::Link { href, children } => Inline::Link {
             href,
-            children: children.into_iter().map(dedupe_consecutive_breaks).collect(),
+            children: children
+                .into_iter()
+                .map(dedupe_consecutive_breaks)
+                .collect(),
         },
         other => other,
     }
@@ -295,7 +328,7 @@ fn inline_of(el: ElementRef, has_outer_prior: bool) -> Inline {
         match child.value() {
             Node::Text(t) => {
                 let has_prior = has_outer_prior || !parts.is_empty();
-                let collapsed = collapse_ws_inline(&t, has_prior);
+                let collapsed = collapse_ws_inline(t, has_prior);
                 if !collapsed.is_empty() {
                     parts.push(Inline::Text(collapsed));
                 }
@@ -344,7 +377,10 @@ fn inline_of(el: ElementRef, has_outer_prior: bool) -> Inline {
                                     Inline::Concat(v) => v,
                                     other => vec![other],
                                 };
-                                Inline::Link { href, children: kids }
+                                Inline::Link {
+                                    href,
+                                    children: kids,
+                                }
                             }
                         }
                         "img" => {
@@ -355,7 +391,12 @@ fn inline_of(el: ElementRef, has_outer_prior: bool) -> Inline {
                         }
                         _ => inline_of(ce, inner_outer_prior), // transparent
                     };
-                    if !inner.is_empty() || matches!(inner, Inline::LineBreak | Inline::Image{..} | Inline::Code(_)) {
+                    if !inner.is_empty()
+                        || matches!(
+                            inner,
+                            Inline::LineBreak | Inline::Image { .. } | Inline::Code(_)
+                        )
+                    {
                         parts.push(inner);
                     }
                 }
@@ -411,9 +452,13 @@ fn parent_is_sup(el: ElementRef) -> bool {
 fn is_footnote_container(el: ElementRef) -> bool {
     let v = el.value();
     let is_aside_footnote = v.name() == "aside"
-        && v.attr("epub:type").map(|t| t.contains("footnote")).unwrap_or(false);
+        && v.attr("epub:type")
+            .map(|t| t.contains("footnote"))
+            .unwrap_or(false);
     let is_div_footnote = v.name() == "div"
-        && v.attr("class").map(|c| c.split_whitespace().any(|t| t == "footnote")).unwrap_or(false);
+        && v.attr("class")
+            .map(|c| c.split_whitespace().any(|t| t == "footnote"))
+            .unwrap_or(false);
     is_aside_footnote || is_div_footnote
 }
 
@@ -432,15 +477,21 @@ fn looks_like_footnote_ref(href: &str, text_content: &str) -> Option<String> {
         Some((p, f)) => (p, f),
         None => return None,
     };
-    if frag.is_empty() { return None; }
+    if frag.is_empty() {
+        return None;
+    }
 
     // Text must be a tiny marker.
     let trimmed = text_content.trim();
-    if trimmed.is_empty() || trimmed.chars().count() > 4 { return None; }
+    if trimmed.is_empty() || trimmed.chars().count() > 4 {
+        return None;
+    }
     let is_marker = trimmed.chars().all(|c| {
         c.is_alphanumeric() || matches!(c, '*' | '†' | '‡' | '§' | '¶' | '⁂' | '^' | '[' | ']')
     });
-    if !is_marker { return None; }
+    if !is_marker {
+        return None;
+    }
 
     // Cross-doc link with short marker → trust it as a footnote ref regardless
     // of fragment shape (Calibre uses #filepos<digits>, etc.).
@@ -456,7 +507,9 @@ fn looks_like_footnote_ref(href: &str, text_content: &str) -> Option<String> {
         || frag_lower.starts_with("note")
         || frag_lower.starts_with("ftn")
         || frag_lower.starts_with("ref");
-    if !is_fn_frag { return None; }
+    if !is_fn_frag {
+        return None;
+    }
     Some(frag.to_string())
 }
 
@@ -487,7 +540,10 @@ mod tests {
     #[test]
     fn paragraph() {
         let b = parse("<html><body><p>Hello world.</p></body></html>");
-        assert_eq!(b, vec![Block::Paragraph(Inline::Text("Hello world.".to_string()))]);
+        assert_eq!(
+            b,
+            vec![Block::Paragraph(Inline::Text("Hello world.".to_string()))]
+        );
     }
 
     #[test]
@@ -495,7 +551,10 @@ mod tests {
         let b = parse("<html><body><h3>Section</h3></body></html>");
         assert_eq!(
             b,
-            vec![Block::Heading { level: 3, text: Inline::Text("Section".to_string()) }]
+            vec![Block::Heading {
+                level: 3,
+                text: Inline::Text("Section".to_string())
+            }]
         );
     }
 
@@ -514,30 +573,40 @@ mod tests {
     #[test]
     fn whitespace_collapsed() {
         let b = parse("<html><body><p>foo   bar\n  baz</p></body></html>");
-        assert_eq!(b, vec![Block::Paragraph(Inline::Text("foo bar baz".to_string()))]);
+        assert_eq!(
+            b,
+            vec![Block::Paragraph(Inline::Text("foo bar baz".to_string()))]
+        );
     }
 
     #[test]
     fn emphasis_and_strong() {
         let b = parse("<html><body><p><em>x</em> and <strong>y</strong></p></body></html>");
-        assert_eq!(b, vec![Block::Paragraph(Inline::Concat(vec![
-            Inline::Emphasis(vec![Inline::Text("x".into())]),
-            Inline::Text(" and ".into()),
-            Inline::Strong(vec![Inline::Text("y".into())]),
-        ]))]);
+        assert_eq!(
+            b,
+            vec![Block::Paragraph(Inline::Concat(vec![
+                Inline::Emphasis(vec![Inline::Text("x".into())]),
+                Inline::Text(" and ".into()),
+                Inline::Strong(vec![Inline::Text("y".into())]),
+            ]))]
+        );
     }
 
     #[test]
     fn inline_code() {
         let b = parse("<html><body><p>use <code>main()</code></p></body></html>");
-        let Block::Paragraph(Inline::Concat(parts)) = &b[0] else { panic!() };
+        let Block::Paragraph(Inline::Concat(parts)) = &b[0] else {
+            panic!()
+        };
         assert!(matches!(&parts[1], Inline::Code(s) if s == "main()"));
     }
 
     #[test]
     fn link() {
         let b = parse(r#"<html><body><p><a href="x.html">go</a></p></body></html>"#);
-        let Block::Paragraph(Inline::Link { href, children }) = &b[0] else { panic!() };
+        let Block::Paragraph(Inline::Link { href, children }) = &b[0] else {
+            panic!()
+        };
         assert_eq!(href, "x.html");
         assert_eq!(children, &vec![Inline::Text("go".into())]);
     }
@@ -545,20 +614,25 @@ mod tests {
     #[test]
     fn line_break() {
         let b = parse("<html><body><p>a<br/>b</p></body></html>");
-        let Block::Paragraph(Inline::Concat(parts)) = &b[0] else { panic!() };
+        let Block::Paragraph(Inline::Concat(parts)) = &b[0] else {
+            panic!()
+        };
         assert!(matches!(parts[1], Inline::LineBreak));
     }
 
     #[test]
     fn unordered_list() {
         let b = parse("<html><body><ul><li>a</li><li>b</li></ul></body></html>");
-        assert_eq!(b, vec![Block::List {
-            ordered: false,
-            items: vec![
-                vec![Block::Paragraph(Inline::Text("a".into()))],
-                vec![Block::Paragraph(Inline::Text("b".into()))],
-            ],
-        }]);
+        assert_eq!(
+            b,
+            vec![Block::List {
+                ordered: false,
+                items: vec![
+                    vec![Block::Paragraph(Inline::Text("a".into()))],
+                    vec![Block::Paragraph(Inline::Text("b".into()))],
+                ],
+            }]
+        );
     }
 
     #[test]
@@ -570,14 +644,21 @@ mod tests {
     #[test]
     fn nested_list() {
         let b = parse("<html><body><ul><li>a<ul><li>b</li></ul></li></ul></body></html>");
-        let Block::List { items, .. } = &b[0] else { panic!() };
+        let Block::List { items, .. } = &b[0] else {
+            panic!()
+        };
         assert!(matches!(items[0][1], Block::List { .. }));
     }
 
     #[test]
     fn blockquote() {
         let b = parse("<html><body><blockquote><p>q</p></blockquote></body></html>");
-        assert_eq!(b, vec![Block::BlockQuote(vec![Block::Paragraph(Inline::Text("q".into()))])]);
+        assert_eq!(
+            b,
+            vec![Block::BlockQuote(vec![Block::Paragraph(Inline::Text(
+                "q".into()
+            ))])]
+        );
     }
 
     #[test]
@@ -589,18 +670,27 @@ mod tests {
     #[test]
     fn pre_code_block_with_language() {
         let b = parse(
-            r#"<html><body><pre><code class="language-rust">fn main() {}</code></pre></body></html>"#
+            r#"<html><body><pre><code class="language-rust">fn main() {}</code></pre></body></html>"#,
         );
-        assert_eq!(b, vec![Block::CodeBlock {
-            lang: Some("rust".into()),
-            code: "fn main() {}".into(),
-        }]);
+        assert_eq!(
+            b,
+            vec![Block::CodeBlock {
+                lang: Some("rust".into()),
+                code: "fn main() {}".into(),
+            }]
+        );
     }
 
     #[test]
     fn pre_no_code() {
         let b = parse("<html><body><pre>raw text</pre></body></html>");
-        assert_eq!(b, vec![Block::CodeBlock { lang: None, code: "raw text".into() }]);
+        assert_eq!(
+            b,
+            vec![Block::CodeBlock {
+                lang: None,
+                code: "raw text".into()
+            }]
+        );
     }
 
     #[test]
@@ -612,13 +702,16 @@ mod tests {
               <tr><td>Bob</td><td>25</td></tr>
             </tbody></table></body></html>"#;
         let b = parse(html);
-        assert_eq!(b, vec![Block::Table {
-            header: vec![Inline::Text("Name".into()), Inline::Text("Age".into())],
-            rows: vec![
-                vec![Inline::Text("Alice".into()), Inline::Text("30".into())],
-                vec![Inline::Text("Bob".into()), Inline::Text("25".into())],
-            ],
-        }]);
+        assert_eq!(
+            b,
+            vec![Block::Table {
+                header: vec![Inline::Text("Name".into()), Inline::Text("Age".into())],
+                rows: vec![
+                    vec![Inline::Text("Alice".into()), Inline::Text("30".into())],
+                    vec![Inline::Text("Bob".into()), Inline::Text("25".into())],
+                ],
+            }]
+        );
     }
 
     #[test]
@@ -628,25 +721,36 @@ mod tests {
             <tr><td>1</td><td>2</td></tr>
         </table></body></html>"#;
         let b = parse(html);
-        let Block::Table { header, rows } = &b[0] else { panic!() };
+        let Block::Table { header, rows } = &b[0] else {
+            panic!()
+        };
         assert_eq!(header.len(), 2);
         assert_eq!(rows.len(), 1);
     }
 
     #[test]
     fn noteref_with_epub_type() {
-        let html = r##"<html><body><p>See<a epub:type="noteref" href="#fn1">1</a>.</p></body></html>"##;
+        let html =
+            r##"<html><body><p>See<a epub:type="noteref" href="#fn1">1</a>.</p></body></html>"##;
         let b = parse(html);
-        let Block::Paragraph(Inline::Concat(parts)) = &b[0] else { panic!() };
-        assert!(parts.iter().any(|i| matches!(i, Inline::FootnoteRef(s) if s == "fn1")));
+        let Block::Paragraph(Inline::Concat(parts)) = &b[0] else {
+            panic!()
+        };
+        assert!(parts
+            .iter()
+            .any(|i| matches!(i, Inline::FootnoteRef(s) if s == "fn1")));
     }
 
     #[test]
     fn sup_anchor_is_noteref() {
         let html = r##"<html><body><p>x<sup><a href="#fn2">2</a></sup>.</p></body></html>"##;
         let b = parse(html);
-        let Block::Paragraph(Inline::Concat(parts)) = &b[0] else { panic!() };
-        assert!(parts.iter().any(|i| matches!(i, Inline::FootnoteRef(s) if s == "fn2")));
+        let Block::Paragraph(Inline::Concat(parts)) = &b[0] else {
+            panic!()
+        };
+        assert!(parts
+            .iter()
+            .any(|i| matches!(i, Inline::FootnoteRef(s) if s == "fn2")));
     }
 
     #[test]
@@ -654,9 +758,14 @@ mod tests {
         let html = r##"<html><body><aside epub:type="footnote" id="fn1"><p>Note one.</p></aside></body></html>"##;
         let b = parse(html);
         assert_eq!(b.len(), 1);
-        let Block::FootnoteDef { id, content } = &b[0] else { panic!() };
+        let Block::FootnoteDef { id, content } = &b[0] else {
+            panic!()
+        };
         assert_eq!(id, "fn1");
-        assert_eq!(content, &vec![Block::Paragraph(Inline::Text("Note one.".into()))]);
+        assert_eq!(
+            content,
+            &vec![Block::Paragraph(Inline::Text("Note one.".into()))]
+        );
     }
 
     #[test]
@@ -665,7 +774,9 @@ mod tests {
         // The space at the start of the span's text must be preserved.
         let html = r#"<html><body><p>they <em>did</em><span> warn you</span>.</p></body></html>"#;
         let b = parse(html);
-        let Block::Paragraph(Inline::Concat(parts)) = &b[0] else { panic!("got: {b:?}") };
+        let Block::Paragraph(Inline::Concat(parts)) = &b[0] else {
+            panic!("got: {b:?}")
+        };
         // Should be: "they ", Emphasis("did"), " warn you", "."
         let mut concatenated = String::new();
         for p in parts {
@@ -674,14 +785,19 @@ mod tests {
                 Inline::Emphasis(xs) => {
                     concatenated.push('*');
                     for x in xs {
-                        if let Inline::Text(s) = x { concatenated.push_str(s); }
+                        if let Inline::Text(s) = x {
+                            concatenated.push_str(s);
+                        }
                     }
                     concatenated.push('*');
                 }
                 _ => {}
             }
         }
-        assert_eq!(concatenated, "they *did* warn you.", "got: {concatenated:?}");
+        assert_eq!(
+            concatenated, "they *did* warn you.",
+            "got: {concatenated:?}"
+        );
     }
 
     #[test]
@@ -690,7 +806,9 @@ mod tests {
         // as a markdown link with empty href.
         let html = r#"<html><body><p>before<a id="foo">.</a>after</p></body></html>"#;
         let b = parse(html);
-        let Block::Paragraph(Inline::Concat(parts)) = &b[0] else { panic!("got: {b:?}") };
+        let Block::Paragraph(Inline::Concat(parts)) = &b[0] else {
+            panic!("got: {b:?}")
+        };
         // Should NOT contain Inline::Link with empty href.
         for p in parts {
             if let Inline::Link { href, .. } = p {
@@ -703,9 +821,14 @@ mod tests {
     fn consecutive_brs_collapse_to_one_linebreak() {
         let html = r#"<html><body><p>a<br/><br/><br/>b</p></body></html>"#;
         let b = parse(html);
-        let Block::Paragraph(Inline::Concat(parts)) = &b[0] else { panic!("got: {b:?}") };
+        let Block::Paragraph(Inline::Concat(parts)) = &b[0] else {
+            panic!("got: {b:?}")
+        };
         // a, LineBreak, b — only one LineBreak between a and b.
-        let lb_count = parts.iter().filter(|i| matches!(i, Inline::LineBreak)).count();
+        let lb_count = parts
+            .iter()
+            .filter(|i| matches!(i, Inline::LineBreak))
+            .count();
         assert_eq!(lb_count, 1, "expected 1 LineBreak; got: {parts:?}");
     }
 
@@ -720,23 +843,41 @@ mod tests {
 </head>
 <body><p>Body content here.</p></body></html>"#;
         let b = parse(html);
-        assert_eq!(b, vec![Block::Paragraph(Inline::Text("Body content here.".into()))]);
+        assert_eq!(
+            b,
+            vec![Block::Paragraph(Inline::Text("Body content here.".into()))]
+        );
     }
 
     #[test]
     fn plain_a_with_fn_fragment_becomes_noteref() {
-        let html = r#"<html><body><p>see<a href="other.html#fn1">1</a> for more.</p></body></html>"#;
+        let html =
+            r#"<html><body><p>see<a href="other.html#fn1">1</a> for more.</p></body></html>"#;
         let b = parse(html);
-        let Block::Paragraph(Inline::Concat(parts)) = &b[0] else { panic!("got: {b:?}") };
-        assert!(parts.iter().any(|i| matches!(i, Inline::FootnoteRef(s) if s == "fn1")), "got: {parts:?}");
+        let Block::Paragraph(Inline::Concat(parts)) = &b[0] else {
+            panic!("got: {b:?}")
+        };
+        assert!(
+            parts
+                .iter()
+                .any(|i| matches!(i, Inline::FootnoteRef(s) if s == "fn1")),
+            "got: {parts:?}"
+        );
     }
 
     #[test]
     fn plain_a_with_footnote_fragment_becomes_noteref() {
         let html = r##"<html><body><p>x<a href="#footnote-3">3</a>.</p></body></html>"##;
         let b = parse(html);
-        let Block::Paragraph(Inline::Concat(parts)) = &b[0] else { panic!("got: {b:?}") };
-        assert!(parts.iter().any(|i| matches!(i, Inline::FootnoteRef(s) if s == "footnote-3")), "got: {parts:?}");
+        let Block::Paragraph(Inline::Concat(parts)) = &b[0] else {
+            panic!("got: {b:?}")
+        };
+        assert!(
+            parts
+                .iter()
+                .any(|i| matches!(i, Inline::FootnoteRef(s) if s == "footnote-3")),
+            "got: {parts:?}"
+        );
     }
 
     #[test]
@@ -744,8 +885,13 @@ mod tests {
         // Link text is too long to be a footnote marker.
         let html = r##"<html><body><p>see <a href="#fn1">this entire footnote about cats</a>.</p></body></html>"##;
         let b = parse(html);
-        let Block::Paragraph(Inline::Concat(parts)) = &b[0] else { panic!("got: {b:?}") };
-        assert!(!parts.iter().any(|i| matches!(i, Inline::FootnoteRef(_))), "got: {parts:?}");
+        let Block::Paragraph(Inline::Concat(parts)) = &b[0] else {
+            panic!("got: {b:?}")
+        };
+        assert!(
+            !parts.iter().any(|i| matches!(i, Inline::FootnoteRef(_))),
+            "got: {parts:?}"
+        );
     }
 
     #[test]
@@ -753,19 +899,35 @@ mod tests {
         // Short text but fragment isn't footnote-like.
         let html = r##"<html><body><p>see <a href="#section-1">1</a> for more.</p></body></html>"##;
         let b = parse(html);
-        let Block::Paragraph(Inline::Concat(parts)) = &b[0] else { panic!("got: {b:?}") };
+        let Block::Paragraph(Inline::Concat(parts)) = &b[0] else {
+            panic!("got: {b:?}")
+        };
         // Should be a Link, not a FootnoteRef.
-        assert!(parts.iter().any(|i| matches!(i, Inline::Link { .. })), "got: {parts:?}");
-        assert!(!parts.iter().any(|i| matches!(i, Inline::FootnoteRef(_))), "got: {parts:?}");
+        assert!(
+            parts.iter().any(|i| matches!(i, Inline::Link { .. })),
+            "got: {parts:?}"
+        );
+        assert!(
+            !parts.iter().any(|i| matches!(i, Inline::FootnoteRef(_))),
+            "got: {parts:?}"
+        );
     }
 
     #[test]
     fn cross_doc_short_marker_with_filepos_fragment_is_noteref() {
         // Calibre-style: <a href="other.html#filepos441606">1</a>
-        let html = r#"<html><body><p>see<a href="other.html#filepos441606">1</a>.</p></body></html>"#;
+        let html =
+            r#"<html><body><p>see<a href="other.html#filepos441606">1</a>.</p></body></html>"#;
         let b = parse(html);
-        let Block::Paragraph(Inline::Concat(parts)) = &b[0] else { panic!("got: {b:?}") };
-        assert!(parts.iter().any(|i| matches!(i, Inline::FootnoteRef(s) if s == "filepos441606")), "got: {parts:?}");
+        let Block::Paragraph(Inline::Concat(parts)) = &b[0] else {
+            panic!("got: {b:?}")
+        };
+        assert!(
+            parts
+                .iter()
+                .any(|i| matches!(i, Inline::FootnoteRef(s) if s == "filepos441606")),
+            "got: {parts:?}"
+        );
     }
 
     #[test]
@@ -773,7 +935,12 @@ mod tests {
         // Within-doc link to "section-1" with marker text "1" — NOT a footnote.
         let html = r##"<html><body><p>see <a href="#section-1">1</a> for more.</p></body></html>"##;
         let b = parse(html);
-        let Block::Paragraph(Inline::Concat(parts)) = &b[0] else { panic!("got: {b:?}") };
-        assert!(!parts.iter().any(|i| matches!(i, Inline::FootnoteRef(_))), "got: {parts:?}");
+        let Block::Paragraph(Inline::Concat(parts)) = &b[0] else {
+            panic!("got: {b:?}")
+        };
+        assert!(
+            !parts.iter().any(|i| matches!(i, Inline::FootnoteRef(_))),
+            "got: {parts:?}"
+        );
     }
 }

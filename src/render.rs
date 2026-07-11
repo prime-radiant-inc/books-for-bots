@@ -4,7 +4,12 @@ fn backtick_fence_for(s: &str) -> String {
     let mut max_run = 0usize;
     let mut cur = 0usize;
     for c in s.chars() {
-        if c == '`' { cur += 1; max_run = max_run.max(cur); } else { cur = 0; }
+        if c == '`' {
+            cur += 1;
+            max_run = max_run.max(cur);
+        } else {
+            cur = 0;
+        }
     }
     "`".repeat(max_run + 1)
 }
@@ -58,9 +63,12 @@ pub fn render(chapters: &[ChapterToRender<'_>]) -> RenderResult {
         r.start_chapter(ch.number, ch.title);
         let drop_set: std::collections::BTreeSet<usize> =
             find_auxiliary_heading_indices(ch.blocks, ch.title, ch.book_title)
-                .into_iter().collect();
+                .into_iter()
+                .collect();
         for (i, b) in ch.blocks.iter().enumerate() {
-            if drop_set.contains(&i) { continue; }
+            if drop_set.contains(&i) {
+                continue;
+            }
             // Scrub running-header h1/h2 anywhere in the body.
             if let Block::Heading { level, text } = b {
                 if *level <= 2 && is_running_header(text, ch.title, ch.book_title) {
@@ -76,7 +84,10 @@ pub fn render(chapters: &[ChapterToRender<'_>]) -> RenderResult {
             }
         }
     }
-    RenderResult { body: r.buf, chapter_offsets: r.offsets }
+    RenderResult {
+        body: r.buf,
+        chapter_offsets: r.offsets,
+    }
 }
 
 pub(crate) fn normalize_ws(s: &str) -> String {
@@ -86,7 +97,13 @@ pub(crate) fn normalize_ws(s: &str) -> String {
     // Also lowercase so "POSITIONING AS CONTEXT" matches "Positioning as Context"
     // — print books often use ALL CAPS for chapter heading display.
     s.chars()
-        .map(|c| if c == '-' || c == '\u{2013}' || c == '\u{2014}' { ' ' } else { c })
+        .map(|c| {
+            if c == '-' || c == '\u{2013}' || c == '\u{2014}' {
+                ' '
+            } else {
+                c
+            }
+        })
         .collect::<String>()
         .to_lowercase()
         .split_whitespace()
@@ -101,16 +118,27 @@ fn normalize_for_match(s: &str) -> String {
 }
 
 pub(crate) fn heading_matches(h_norm: &str, target_norm: &str) -> bool {
-    if h_norm == target_norm { return true; }
+    if h_norm == target_norm {
+        return true;
+    }
     // Also try with dashes stripped so "Man-Month" matches "Man Month".
     let h_dash = normalize_for_match(h_norm);
     let t_dash = normalize_for_match(target_norm);
-    if h_dash == t_dash { return true; }
-    if h_norm.len() < 4 || target_norm.len() < 4 { return false; }
-    if target_norm.contains(h_norm) || h_norm.contains(target_norm) { return true; }
+    if h_dash == t_dash {
+        return true;
+    }
+    if h_norm.len() < 4 || target_norm.len() < 4 {
+        return false;
+    }
+    if target_norm.contains(h_norm) || h_norm.contains(target_norm) {
+        return true;
+    }
     // Fuzzy contains with dashes stripped.
-    if h_dash.len() >= 4 && t_dash.len() >= 4 {
-        if t_dash.contains(&h_dash) || h_dash.contains(&t_dash) { return true; }
+    if h_dash.len() >= 4
+        && t_dash.len() >= 4
+        && (t_dash.contains(&h_dash) || h_dash.contains(&t_dash))
+    {
+        return true;
     }
     false
 }
@@ -159,7 +187,9 @@ fn find_auxiliary_heading_indices(
 /// occurrences from anywhere in the chapter body, not just the leading aux area.
 fn is_running_header(text: &Inline, chapter_title: &str, book_title: &str) -> bool {
     let h_norm = normalize_ws(&inline_to_text(text));
-    if h_norm.is_empty() { return false; }
+    if h_norm.is_empty() {
+        return false;
+    }
     let chap_norm = normalize_ws(chapter_title);
     let book_norm = normalize_ws(book_title);
     heading_matches(&h_norm, &chap_norm)
@@ -187,14 +217,29 @@ struct Renderer {
 }
 
 impl Renderer {
-    fn new() -> Self { Self { buf: String::new(), line: 1, offsets: Vec::new() } }
+    fn new() -> Self {
+        Self {
+            buf: String::new(),
+            line: 1,
+            offsets: Vec::new(),
+        }
+    }
 
-    fn current_byte(&self) -> u64 { self.buf.len() as u64 }
+    fn current_byte(&self) -> u64 {
+        self.buf.len() as u64
+    }
 
     fn ensure_blank_line(&mut self) {
-        if self.buf.is_empty() { return; }
-        if self.buf.ends_with("\n\n") { return; }
-        if self.buf.ends_with('\n') { self.write_raw("\n"); return; }
+        if self.buf.is_empty() {
+            return;
+        }
+        if self.buf.ends_with("\n\n") {
+            return;
+        }
+        if self.buf.ends_with('\n') {
+            self.write_raw("\n");
+            return;
+        }
         self.write_raw("\n\n");
     }
 
@@ -207,7 +252,10 @@ impl Renderer {
         let _ = number; // chapter number is used by upstream namespacing, not by render
         self.ensure_blank_line();
         // Record offset at the heading line.
-        self.offsets.push(ChapterOffset { byte: self.current_byte(), line: self.line });
+        self.offsets.push(ChapterOffset {
+            byte: self.current_byte(),
+            line: self.line,
+        });
         self.write_raw(&format!("## {title}\n\n"));
     }
 
@@ -240,7 +288,9 @@ impl Renderer {
             Block::BlockQuote(children) => {
                 self.ensure_blank_line();
                 let mut sub = Renderer::new();
-                for c in children { sub.render_block(c); }
+                for c in children {
+                    sub.render_block(c);
+                }
                 for line in sub.buf.trim_end().split_inclusive('\n') {
                     self.write_raw("> ");
                     self.write_raw(line);
@@ -269,7 +319,9 @@ impl Renderer {
                     };
                     let indent = " ".repeat(marker.len());
                     let mut sub = Renderer::new();
-                    for b in item { sub.render_block(b); }
+                    for b in item {
+                        sub.render_block(b);
+                    }
                     let trimmed = sub.buf.trim();
                     let mut first_line = true;
                     for line in trimmed.split_inclusive('\n') {
@@ -294,19 +346,25 @@ impl Renderer {
                 self.ensure_blank_line();
                 self.write_raw("| ");
                 for (i, h) in header.iter().enumerate() {
-                    if i > 0 { self.write_raw(" | "); }
+                    if i > 0 {
+                        self.write_raw(" | ");
+                    }
                     self.render_cell(h);
                 }
                 self.write_raw(" |\n| ");
                 for i in 0..header.len() {
-                    if i > 0 { self.write_raw(" | "); }
+                    if i > 0 {
+                        self.write_raw(" | ");
+                    }
                     self.write_raw("---");
                 }
                 self.write_raw(" |\n");
                 for row in rows {
                     self.write_raw("| ");
                     for (i, c) in row.iter().enumerate() {
-                        if i > 0 { self.write_raw(" | "); }
+                        if i > 0 {
+                            self.write_raw(" | ");
+                        }
                         self.render_cell(c);
                     }
                     self.write_raw(" |\n");
@@ -321,7 +379,9 @@ impl Renderer {
                 for c in code.chars() {
                     if c == '`' {
                         cur += 1;
-                        if cur > max_run { max_run = cur; }
+                        if cur > max_run {
+                            max_run = cur;
+                        }
                     } else {
                         cur = 0;
                     }
@@ -329,28 +389,37 @@ impl Renderer {
                 let fence_len = max_run.max(2) + 1;
                 let fence = "`".repeat(fence_len);
                 self.write_raw(&fence);
-                if let Some(l) = lang { self.write_raw(l); }
+                if let Some(l) = lang {
+                    self.write_raw(l);
+                }
                 self.write_raw("\n");
                 self.write_raw(code);
-                if !code.ends_with('\n') { self.write_raw("\n"); }
+                if !code.ends_with('\n') {
+                    self.write_raw("\n");
+                }
                 self.write_raw(&fence);
                 self.write_raw("\n\n");
             }
             Block::FootnoteDef { id, content } => {
                 self.ensure_blank_line();
                 let mut sub = Renderer::new();
-                for c in content { sub.render_block(c); }
+                for c in content {
+                    sub.render_block(c);
+                }
                 let body = sub.buf.trim().to_string();
                 self.write_raw(&format!("[^{id}]: "));
                 // Continuation lines indented by 4 spaces per CommonMark footnotes.
                 let mut first = true;
                 for line in body.split_inclusive('\n') {
-                    if first { first = false; } else { self.write_raw("    "); }
+                    if first {
+                        first = false;
+                    } else {
+                        self.write_raw("    ");
+                    }
                     self.write_raw(line);
                 }
                 self.write_raw("\n\n");
-            }
-            // All Block variants are explicitly handled above; no catch-all needed.
+            } // All Block variants are explicitly handled above; no catch-all needed.
         }
     }
 
@@ -364,36 +433,48 @@ impl Renderer {
     fn render_inline(&mut self, i: &Inline) {
         match i {
             Inline::Text(s) => self.write_raw(s),
-            Inline::Concat(xs) => for x in xs { self.render_inline(x); },
+            Inline::Concat(xs) => {
+                for x in xs {
+                    self.render_inline(x);
+                }
+            }
             Inline::Emphasis(xs) => {
                 self.write_raw("*");
-                for x in xs { self.render_inline(x); }
+                for x in xs {
+                    self.render_inline(x);
+                }
                 self.write_raw("*");
             }
             Inline::Strong(xs) => {
                 self.write_raw("**");
-                for x in xs { self.render_inline(x); }
+                for x in xs {
+                    self.render_inline(x);
+                }
                 self.write_raw("**");
             }
             Inline::Code(s) => {
                 let fence = backtick_fence_for(s);
                 self.write_raw(&fence);
-                if s.starts_with('`') { self.write_raw(" "); }
+                if s.starts_with('`') {
+                    self.write_raw(" ");
+                }
                 self.write_raw(s);
-                if s.ends_with('`') { self.write_raw(" "); }
+                if s.ends_with('`') {
+                    self.write_raw(" ");
+                }
                 self.write_raw(&fence);
             }
             Inline::Link { href, children } => {
                 self.write_raw("[");
-                for c in children { self.render_inline(c); }
+                for c in children {
+                    self.render_inline(c);
+                }
                 self.write_raw(&format!("]({href})"));
             }
-            Inline::Image { src, alt, title } => {
-                match title {
-                    Some(t) => self.write_raw(&format!(r#"![{alt}]({src} "{t}")"#)),
-                    None => self.write_raw(&format!("![{alt}]({src})")),
-                }
-            }
+            Inline::Image { src, alt, title } => match title {
+                Some(t) => self.write_raw(&format!(r#"![{alt}]({src} "{t}")"#)),
+                None => self.write_raw(&format!("![{alt}]({src})")),
+            },
             Inline::FootnoteRef(id) => self.write_raw(&format!("[^{id}]")),
             Inline::LineBreak => self.write_raw("  \n"),
         }
@@ -402,36 +483,48 @@ impl Renderer {
     fn render_inline_for_heading(&mut self, i: &Inline) {
         match i {
             Inline::Text(s) => self.write_raw(s),
-            Inline::Concat(xs) => for x in xs { self.render_inline_for_heading(x); },
+            Inline::Concat(xs) => {
+                for x in xs {
+                    self.render_inline_for_heading(x);
+                }
+            }
             Inline::Emphasis(xs) => {
                 self.write_raw("*");
-                for x in xs { self.render_inline_for_heading(x); }
+                for x in xs {
+                    self.render_inline_for_heading(x);
+                }
                 self.write_raw("*");
             }
             Inline::Strong(xs) => {
                 self.write_raw("**");
-                for x in xs { self.render_inline_for_heading(x); }
+                for x in xs {
+                    self.render_inline_for_heading(x);
+                }
                 self.write_raw("**");
             }
             Inline::Code(s) => {
                 let fence = backtick_fence_for(s);
                 self.write_raw(&fence);
-                if s.starts_with('`') { self.write_raw(" "); }
+                if s.starts_with('`') {
+                    self.write_raw(" ");
+                }
                 self.write_raw(s);
-                if s.ends_with('`') { self.write_raw(" "); }
+                if s.ends_with('`') {
+                    self.write_raw(" ");
+                }
                 self.write_raw(&fence);
             }
             Inline::Link { href, children } => {
                 self.write_raw("[");
-                for c in children { self.render_inline_for_heading(c); }
+                for c in children {
+                    self.render_inline_for_heading(c);
+                }
                 self.write_raw(&format!("]({href})"));
             }
-            Inline::Image { src, alt, title } => {
-                match title {
-                    Some(t) => self.write_raw(&format!(r#"![{alt}]({src} "{t}")"#)),
-                    None => self.write_raw(&format!("![{alt}]({src})")),
-                }
-            }
+            Inline::Image { src, alt, title } => match title {
+                Some(t) => self.write_raw(&format!(r#"![{alt}]({src} "{t}")"#)),
+                None => self.write_raw(&format!("![{alt}]({src})")),
+            },
             Inline::FootnoteRef(id) => self.write_raw(&format!("[^{id}]")),
             // In headings, LineBreaks become spaces. Surrounding stray spaces
             // are collapsed by collapse_runs_of_whitespace at the heading-block
@@ -472,8 +565,14 @@ mod tests {
     #[test]
     fn heading_levels_shift() {
         let s = render_one(vec![
-            Block::Heading { level: 1, text: Inline::Text("A".into()) },
-            Block::Heading { level: 5, text: Inline::Text("B".into()) },
+            Block::Heading {
+                level: 1,
+                text: Inline::Text("A".into()),
+            },
+            Block::Heading {
+                level: 5,
+                text: Inline::Text("B".into()),
+            },
         ]);
         assert!(s.contains("## A\n"));
         assert!(s.contains("###### B\n"));
@@ -487,9 +586,9 @@ mod tests {
 
     #[test]
     fn blockquote() {
-        let s = render_one(vec![Block::BlockQuote(vec![
-            Block::Paragraph(Inline::Text("said".into())),
-        ])]);
+        let s = render_one(vec![Block::BlockQuote(vec![Block::Paragraph(
+            Inline::Text("said".into()),
+        )])]);
         assert!(s.contains("> said\n"));
     }
 
@@ -512,7 +611,8 @@ mod tests {
     #[test]
     fn link() {
         let s = render_one(vec![Block::Paragraph(Inline::Link {
-            href: "h".into(), children: vec![Inline::Text("t".into())],
+            href: "h".into(),
+            children: vec![Inline::Text("t".into())],
         })]);
         assert!(s.contains("[t](h)"));
     }
@@ -520,7 +620,9 @@ mod tests {
     #[test]
     fn line_break() {
         let s = render_one(vec![Block::Paragraph(Inline::Concat(vec![
-            Inline::Text("a".into()), Inline::LineBreak, Inline::Text("b".into()),
+            Inline::Text("a".into()),
+            Inline::LineBreak,
+            Inline::Text("b".into()),
         ]))]);
         assert!(s.contains("a  \nb"));
     }
@@ -534,7 +636,9 @@ mod tests {
     #[test]
     fn block_image() {
         let s = render_one(vec![Block::Image {
-            src: "images/x.jpg".into(), alt: "cat".into(), title: None,
+            src: "images/x.jpg".into(),
+            alt: "cat".into(),
+            title: None,
         }]);
         assert!(s.contains("![cat](images/x.jpg)"));
     }
@@ -542,7 +646,9 @@ mod tests {
     #[test]
     fn block_image_with_title() {
         let s = render_one(vec![Block::Image {
-            src: "x.jpg".into(), alt: "a".into(), title: Some("t".into()),
+            src: "x.jpg".into(),
+            alt: "a".into(),
+            title: Some("t".into()),
         }]);
         assert!(s.contains(r#"![a](x.jpg "t")"#));
     }
@@ -595,18 +701,27 @@ mod tests {
                 vec![Inline::Text("3 | x".into()), Inline::Text("4".into())],
             ],
         }]);
-        assert!(s.contains("| A | B |\n| --- | --- |\n| 1 | 2 |\n| 3 \\| x | 4 |\n"), "got: {s}");
+        assert!(
+            s.contains("| A | B |\n| --- | --- |\n| 1 | 2 |\n| 3 \\| x | 4 |\n"),
+            "got: {s}"
+        );
     }
 
     #[test]
     fn code_block_no_language() {
-        let s = render_one(vec![Block::CodeBlock { lang: None, code: "x = 1".into() }]);
+        let s = render_one(vec![Block::CodeBlock {
+            lang: None,
+            code: "x = 1".into(),
+        }]);
         assert!(s.contains("```\nx = 1\n```\n"));
     }
 
     #[test]
     fn code_block_with_language() {
-        let s = render_one(vec![Block::CodeBlock { lang: Some("rs".into()), code: "fn main(){}".into() }]);
+        let s = render_one(vec![Block::CodeBlock {
+            lang: Some("rs".into()),
+            code: "fn main(){}".into(),
+        }]);
         assert!(s.contains("```rs\nfn main(){}\n```\n"));
     }
 
@@ -632,7 +747,10 @@ mod tests {
     #[test]
     fn first_heading_matching_title_is_skipped() {
         let blocks = [
-            Block::Heading { level: 1, text: Inline::Text("Cover".into()) },
+            Block::Heading {
+                level: 1,
+                text: Inline::Text("Cover".into()),
+            },
             Block::Paragraph(Inline::Text("body".into())),
         ];
         let chs = vec![ChapterToRender {
@@ -650,9 +768,10 @@ mod tests {
 
     #[test]
     fn first_heading_not_matching_title_is_kept() {
-        let blocks = [
-            Block::Heading { level: 1, text: Inline::Text("Different Heading".into()) },
-        ];
+        let blocks = [Block::Heading {
+            level: 1,
+            text: Inline::Text("Different Heading".into()),
+        }];
         let chs = vec![ChapterToRender {
             number: 1,
             title: "Cover",
@@ -669,8 +788,11 @@ mod tests {
     #[test]
     fn skip_heading_preceded_by_empty_paragraph() {
         let blocks = [
-            Block::Paragraph(Inline::empty()),  // auxiliary
-            Block::Heading { level: 1, text: Inline::Text("Cover".into()) },
+            Block::Paragraph(Inline::empty()), // auxiliary
+            Block::Heading {
+                level: 1,
+                text: Inline::Text("Cover".into()),
+            },
             Block::Paragraph(Inline::Text("body".into())),
         ];
         let chs = vec![ChapterToRender {
@@ -688,8 +810,15 @@ mod tests {
     #[test]
     fn skip_heading_preceded_by_image() {
         let blocks = [
-            Block::Image { src: "x.jpg".into(), alt: "".into(), title: None },
-            Block::Heading { level: 1, text: Inline::Text("Intro".into()) },
+            Block::Image {
+                src: "x.jpg".into(),
+                alt: "".into(),
+                title: None,
+            },
+            Block::Heading {
+                level: 1,
+                text: Inline::Text("Intro".into()),
+            },
         ];
         let chs = vec![ChapterToRender {
             number: 1,
@@ -710,7 +839,10 @@ mod tests {
         // A heading mid-chapter that matches the chapter title is a running header.
         let blocks = [
             Block::Paragraph(Inline::Text("hello".into())),
-            Block::Heading { level: 1, text: Inline::Text("Foo".into()) },
+            Block::Heading {
+                level: 1,
+                text: Inline::Text("Foo".into()),
+            },
         ];
         let chs = vec![ChapterToRender {
             number: 1,
@@ -736,7 +868,10 @@ mod tests {
             ]),
         }]);
         assert!(s.contains("## Title subtitle\n"), "got: {s}");
-        assert!(!s.contains("Title  \n"), "should not have hard break in heading; got: {s}");
+        assert!(
+            !s.contains("Title  \n"),
+            "should not have hard break in heading; got: {s}"
+        );
     }
 
     #[test]
@@ -750,22 +885,23 @@ mod tests {
             ]),
         }]);
         assert!(s.contains("## Title subtitle\n"), "got: {s}");
-        assert!(!s.contains("Title  subtitle"), "should collapse double space; got: {s}");
+        assert!(
+            !s.contains("Title  subtitle"),
+            "should collapse double space; got: {s}"
+        );
     }
 
     #[test]
     fn skip_heading_with_whitespace_difference() {
         // Source heading rendered as "1  High-Tech" (double space from <br/> as space).
-        let blocks = [
-            Block::Heading {
-                level: 1,
-                text: Inline::Concat(vec![
-                    Inline::Text("1".into()),
-                    Inline::LineBreak,
-                    Inline::Text(" High-Tech".into()),
-                ]),
-            },
-        ];
+        let blocks = [Block::Heading {
+            level: 1,
+            text: Inline::Concat(vec![
+                Inline::Text("1".into()),
+                Inline::LineBreak,
+                Inline::Text(" High-Tech".into()),
+            ]),
+        }];
         let chs = vec![ChapterToRender {
             number: 1,
             title: "1 High-Tech",
@@ -780,9 +916,10 @@ mod tests {
     #[test]
     fn fuzzy_contains_match_skips_short_heading() {
         // Title is "Chapter 1: The Tar Pit"; source heading is just "The Tar Pit".
-        let blocks = [
-            Block::Heading { level: 1, text: Inline::Text("The Tar Pit".into()) },
-        ];
+        let blocks = [Block::Heading {
+            level: 1,
+            text: Inline::Text("The Tar Pit".into()),
+        }];
         let chs = vec![ChapterToRender {
             number: 1,
             title: "Chapter 1: The Tar Pit",
@@ -792,14 +929,23 @@ mod tests {
         }];
         let body = render(&chs).body;
         assert!(body.contains("## Chapter 1: The Tar Pit"));
-        assert!(!body.contains("## The Tar Pit\n"), "should be deduped; got: {body}");
+        assert!(
+            !body.contains("## The Tar Pit\n"),
+            "should be deduped; got: {body}"
+        );
     }
 
     #[test]
     fn drops_running_header_matching_book_title() {
         let blocks = [
-            Block::Heading { level: 1, text: Inline::Text("Chapter 1".into()) },
-            Block::Heading { level: 1, text: Inline::Text("The Mythical Man-Month".into()) },
+            Block::Heading {
+                level: 1,
+                text: Inline::Text("Chapter 1".into()),
+            },
+            Block::Heading {
+                level: 1,
+                text: Inline::Text("The Mythical Man-Month".into()),
+            },
             Block::Paragraph(Inline::Text("body".into())),
         ];
         let chs = vec![ChapterToRender {
@@ -811,7 +957,10 @@ mod tests {
         }];
         let body = render(&chs).body;
         assert_eq!(body.matches("## Chapter 1").count(), 1, "got: {body}");
-        assert!(!body.contains("## The Mythical Man-Month"), "running header should be dropped; got: {body}");
+        assert!(
+            !body.contains("## The Mythical Man-Month"),
+            "running header should be dropped; got: {body}"
+        );
         assert!(body.contains("body"));
     }
 
@@ -819,7 +968,10 @@ mod tests {
     fn fuzzy_match_requires_minimum_length() {
         // "X" containing "Foo" or vice versa shouldn't match.
         let blocks = [
-            Block::Heading { level: 1, text: Inline::Text("X".into()) },
+            Block::Heading {
+                level: 1,
+                text: Inline::Text("X".into()),
+            },
             Block::Paragraph(Inline::Text("body".into())),
         ];
         let chs = vec![ChapterToRender {
@@ -837,17 +989,29 @@ mod tests {
     #[test]
     fn hyphen_normalization_matches_dash_variants() {
         // Note: normalize_ws also lowercases so "Positioning" == "POSITIONING".
-        assert_eq!(normalize_ws("The Mythical Man-Month"), "the mythical man month");
+        assert_eq!(
+            normalize_ws("The Mythical Man-Month"),
+            "the mythical man month"
+        );
         assert_eq!(normalize_ws("Foo \u{2013} Bar"), "foo bar");
         assert_eq!(normalize_ws("Foo \u{2014} Bar"), "foo bar");
-        assert_eq!(normalize_ws("POSITIONING AS CONTEXT"), "positioning as context");
+        assert_eq!(
+            normalize_ws("POSITIONING AS CONTEXT"),
+            "positioning as context"
+        );
     }
 
     #[test]
     fn book_title_with_hyphen_matches_running_header_no_hyphen() {
         let blocks = [
-            Block::Heading { level: 1, text: Inline::Text("Chapter 1".into()) },
-            Block::Heading { level: 1, text: Inline::Text("The Mythical Man Month".into()) },
+            Block::Heading {
+                level: 1,
+                text: Inline::Text("Chapter 1".into()),
+            },
+            Block::Heading {
+                level: 1,
+                text: Inline::Text("The Mythical Man Month".into()),
+            },
             Block::Paragraph(Inline::Text("body".into())),
         ];
         let chs = vec![ChapterToRender {
@@ -859,16 +1023,25 @@ mod tests {
         }];
         let body = render(&chs).body;
         assert_eq!(body.matches("## Chapter 1").count(), 1, "got: {body}");
-        assert!(!body.contains("## The Mythical Man Month"), "running header should drop; got: {body}");
+        assert!(
+            !body.contains("## The Mythical Man Month"),
+            "running header should drop; got: {body}"
+        );
         assert!(body.contains("body"));
     }
 
     #[test]
     fn mid_chapter_running_header_is_scrubbed() {
         let blocks = [
-            Block::Heading { level: 1, text: Inline::Text("The Tar Pit".into()) },
+            Block::Heading {
+                level: 1,
+                text: Inline::Text("The Tar Pit".into()),
+            },
             Block::Paragraph(Inline::Text("Some prose.".into())),
-            Block::Heading { level: 1, text: Inline::Text("The Mythical Man Month".into()) },
+            Block::Heading {
+                level: 1,
+                text: Inline::Text("The Mythical Man Month".into()),
+            },
             Block::Paragraph(Inline::Text("More prose.".into())),
         ];
         let chs = vec![ChapterToRender {
@@ -888,8 +1061,14 @@ mod tests {
     fn legitimate_h3_in_chapter_kept() {
         // A subheading at level >= 3 should not be scrubbed even if its text matches.
         let blocks = [
-            Block::Heading { level: 1, text: Inline::Text("Foo".into()) },
-            Block::Heading { level: 3, text: Inline::Text("Foo".into()) },
+            Block::Heading {
+                level: 1,
+                text: Inline::Text("Foo".into()),
+            },
+            Block::Heading {
+                level: 3,
+                text: Inline::Text("Foo".into()),
+            },
             Block::Paragraph(Inline::Text("body".into())),
         ];
         let chs = vec![ChapterToRender {
@@ -900,6 +1079,9 @@ mod tests {
             footnotes: &[],
         }];
         let body = render(&chs).body;
-        assert!(body.contains("#### Foo"), "h3 (shifted to ####) should be preserved; got: {body}");
+        assert!(
+            body.contains("#### Foo"),
+            "h3 (shifted to ####) should be preserved; got: {body}"
+        );
     }
 }

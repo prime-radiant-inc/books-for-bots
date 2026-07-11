@@ -8,8 +8,14 @@ fn loads_minimal_two_chapter_book() {
         "Hello",
         "An Author",
         &[
-            common::ChapterSpec { title: "One", html: "<p>First chapter.</p>" },
-            common::ChapterSpec { title: "Two", html: "<p>Second chapter.</p>" },
+            common::ChapterSpec {
+                title: "One",
+                html: "<p>First chapter.</p>",
+            },
+            common::ChapterSpec {
+                title: "Two",
+                html: "<p>Second chapter.</p>",
+            },
         ],
     );
     let tmp = tempfile::NamedTempFile::new().unwrap();

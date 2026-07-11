@@ -5,6 +5,7 @@ pub use error::Error;
 pub mod assemble;
 pub mod block;
 pub mod cli;
+mod error;
 pub mod extract;
 pub mod frontmatter;
 pub mod images;
@@ -12,7 +13,6 @@ pub mod load;
 pub mod render;
 pub mod slug;
 pub mod write;
-mod error;
 
 pub type Result<T> = std::result::Result<T, Error>;
 

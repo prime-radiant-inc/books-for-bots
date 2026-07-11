@@ -8,8 +8,14 @@ fn two_runs_produce_identical_output() {
         "Det",
         "T",
         &[
-            common::ChapterSpec { title: "A", html: "<p>x</p><p>y</p>" },
-            common::ChapterSpec { title: "B", html: "<ul><li>1</li><li>2</li></ul>" },
+            common::ChapterSpec {
+                title: "A",
+                html: "<p>x</p><p>y</p>",
+            },
+            common::ChapterSpec {
+                title: "B",
+                html: "<ul><li>1</li><li>2</li></ul>",
+            },
         ],
     );
     let tmp = tempfile::tempdir().unwrap();
@@ -18,7 +24,11 @@ fn two_runs_produce_identical_output() {
 
     let run = |sub: &str| {
         let out = tmp.path().join(sub);
-        let args = Args { input: in_path.clone(), output_dir: out.clone(), force: false };
+        let args = Args {
+            input: in_path.clone(),
+            output_dir: out.clone(),
+            force: false,
+        };
         write::convert(&args).expect("convert");
         std::fs::read(out.join("det-t/det-t.md")).unwrap()
     };

@@ -9,16 +9,30 @@ fn chapter_offsets_seek_to_correct_heading() {
         "Off",
         "T",
         &[
-            common::ChapterSpec { title: "First", html: "<p>aaa</p>" },
-            common::ChapterSpec { title: "Second", html: "<p>bbb bbb bbb bbb</p>" },
-            common::ChapterSpec { title: "Third", html: "<p>ccc</p>" },
+            common::ChapterSpec {
+                title: "First",
+                html: "<p>aaa</p>",
+            },
+            common::ChapterSpec {
+                title: "Second",
+                html: "<p>bbb bbb bbb bbb</p>",
+            },
+            common::ChapterSpec {
+                title: "Third",
+                html: "<p>ccc</p>",
+            },
         ],
     );
     let tmp = tempfile::tempdir().unwrap();
     let in_path = tmp.path().join("off.epub");
     std::fs::write(&in_path, &fx.bytes).unwrap();
     let out = tmp.path().join("out");
-    write::convert(&Args { input: in_path, output_dir: out.clone(), force: false }).unwrap();
+    write::convert(&Args {
+        input: in_path,
+        output_dir: out.clone(),
+        force: false,
+    })
+    .unwrap();
 
     let path = out.join("off-t/off-t.md");
     let s = std::fs::read_to_string(&path).unwrap();
@@ -30,9 +44,16 @@ fn chapter_offsets_seek_to_correct_heading() {
     let mut in_chapters = false;
     let mut current_title: Option<String> = None;
     for line in s.lines() {
-        if line == "chapters:" { in_chapters = true; continue; }
-        if !in_chapters { continue; }
-        if line == "---" { break; }
+        if line == "chapters:" {
+            in_chapters = true;
+            continue;
+        }
+        if !in_chapters {
+            continue;
+        }
+        if line == "---" {
+            break;
+        }
         if let Some(rest) = line.strip_prefix("  - title: ") {
             current_title = Some(rest.trim_matches('"').to_string());
         } else if let Some(rest) = line.strip_prefix("    line:") {
@@ -53,9 +74,14 @@ fn chapter_offsets_seek_to_correct_heading() {
         let n = f.read(&mut buf).unwrap();
         let s = std::str::from_utf8(&buf[..n]).unwrap();
         let expected_prefix = format!("## {}", titles[i]);
-        assert!(s.starts_with(&expected_prefix),
+        assert!(
+            s.starts_with(&expected_prefix),
             "byte offset {} for chapter {:?} does not start with {:?}; got: {:?}",
-            byte, titles[i], expected_prefix, &s[..s.len().min(80)]);
+            byte,
+            titles[i],
+            expected_prefix,
+            &s[..s.len().min(80)]
+        );
     }
 
     // Verify line offsets too.
@@ -63,8 +89,16 @@ fn chapter_offsets_seek_to_correct_heading() {
     let lines: Vec<&str> = all.lines().collect();
     for (i, &n) in lines_n.iter().enumerate() {
         let expected_prefix = format!("## {}", titles[i]);
-        let actual = lines.get((n as usize).saturating_sub(1)).copied().unwrap_or("");
-        assert!(actual.starts_with(&expected_prefix),
-            "line {} for chapter {:?} is {:?}", n, titles[i], actual);
+        let actual = lines
+            .get((n as usize).saturating_sub(1))
+            .copied()
+            .unwrap_or("");
+        assert!(
+            actual.starts_with(&expected_prefix),
+            "line {} for chapter {:?} is {:?}",
+            n,
+            titles[i],
+            actual
+        );
     }
 }
