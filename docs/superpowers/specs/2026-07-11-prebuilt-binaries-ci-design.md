@@ -24,7 +24,7 @@ platforms agents actually run on.
 | `x86_64-unknown-linux-musl` | `ubuntu-latest` | static; any distro, Alpine containers |
 | `x86_64-unknown-linux-gnu` | `ubuntu-latest` | glibc-linked |
 | `aarch64-unknown-linux-musl` | `ubuntu-24.04-arm` | native ARM runner; Graviton/ARM containers |
-| `x86_64-apple-darwin` | `macos-13` | Intel Mac |
+| `x86_64-apple-darwin` | `macos-15-intel` | Intel Mac (`macos-13` was retired) |
 | `aarch64-apple-darwin` | `macos-latest` | Apple Silicon |
 | `x86_64-pc-windows-msvc` | `windows-latest` | Windows |
 
